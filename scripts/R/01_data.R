@@ -82,7 +82,7 @@ assemble_msi_data <- function(root_path) {
 #' @return Long tibble with columns X, Y, TIC, Feature, Intensity
 pivot_msi_long <- function(data_wide, feature_indices) {
   target_cols <- colnames(data_wide)[feature_indices]
-  
+
   data_wide |>
     select(X, Y, RAW.TIC.OR.ROI.sum.peak, all_of(target_cols)) |>
     pivot_longer(
@@ -103,35 +103,46 @@ normalize_msi_data <- function(data_long) {
     select(-RAW.TIC.OR.ROI.sum.peak)
 }
 
+dataset_summary <- function(raw_wide, feature_range) {
+  n_pixels   <- nrow(raw_wide)
+  n_features <- length(feature_range) # eventually remove the first one that do not count
+  pixel_grid <- paste0(max(raw_wide$X), "x", max(raw_wide$Y))
+  
+  raw_subset <- raw_wide[, feature_range]
+  
+  total_cells   <- n_pixels * n_features
+  na_count      <- sum(is.na(raw_subset))
+  na_perc       <- (na_count / total_cells) * 100
+  
+  cols_with_na    <- colSums(is.na(raw_subset)) > 0
+  num_cols_with_na <- sum(cols_with_na)
+  perc_cols_with_na <- (num_cols_with_na / n_features) * 100
+  
+  zero_count <- sum(raw_subset == 0, na.rm = TRUE)
+  zero_perc  <- (zero_count / total_cells) * 100
 
-# Data objects ------------------------------------------------------------
-
-# NOTE: edit 'feature_range' here to control which features are loaded
-# FEATURE_RANGE <- 8:107  # min = 8, max = 1007
-# 
-# raw_wide <- assemble_msi_data("../Data/ROI_Luca1303") |>
-#   distinct(X, Y, .keep_all = TRUE)   # remove duplicate pixels
-# 
-# feature_cols <- colnames(raw_wide)[FEATURE_RANGE]
-# 
-# # Long-format, normalised — used by 07_visualisation.R
-# df_visualisation <- raw_wide |>
-#   pivot_msi_long(feature_indices = FEATURE_RANGE) |>
-#   normalize_msi_data()
-# 
-# # Wide matrix ready for imputation — used by 03_imputation.R and 06_experiment.R
-# df_impute <- raw_wide |>
-#   select(X, Y, RAW.TIC.OR.ROI.sum.peak, all_of(feature_cols)) |>
-#   select(
-#     X, Y, RAW.TIC.OR.ROI.sum.peak,
-#     where(~ !any(is.na(.)) && !any(. == 0))   # drop all-NA or all-zero features
-#   ) |>
-#   mutate(across(
-#     -c(X, Y, RAW.TIC.OR.ROI.sum.peak),
-#     ~ . / RAW.TIC.OR.ROI.sum.peak             # TIC normalisation
-#   )) |>
-#   select(-RAW.TIC.OR.ROI.sum.peak)
-# 
-# # Coordinates and numeric matrix — consumed by imputation and metric functions
-# coords     <- df_impute |> select(X, Y)
-# mat_impute <- df_impute |> select(-X, -Y) |> as.matrix()
+  cols_with_zero <- colSums(raw_subset == 0, na.rm = TRUE) > 0
+  num_cols_with_zero <- sum(cols_with_zero)
+  perc_cols_with_zero <- (num_cols_with_zero / n_features) * 100
+  
+  rows_with_zero <- sum(apply(raw_subset, 1, function(row) any(row == 0, na.rm = TRUE)))
+  perc_rows_with_zero <- (rows_with_zero / n_pixels) * 100
+  
+  tibble(
+    Metric = c(
+      "Total Pixels", "Total Features", "Grid Dimensions",
+      "Total NAs", "NA Percentage",
+      "Features with NAs", "Features (cols) with NAs (%)",
+      "Total Zeros (LOD)", "Zero Percentage", "Features with Zeros",
+      "Features (cols) with Zeros (%)", "Rows with Zeros", "Rows with Zeros (%)"
+    ),
+    Value = c(
+      as.character(n_pixels), as.character(n_features), pixel_grid,
+      as.character(na_count), sprintf("%.2f%%", na_perc),
+      as.character(num_cols_with_na), sprintf("%.2f%%", perc_cols_with_na),
+      as.character(zero_count), sprintf("%.2f%%", zero_perc), as.character(num_cols_with_zero),
+      sprintf("%.2f%%", perc_cols_with_zero), as.character(rows_with_zero),
+      sprintf("%.2f%%", perc_rows_with_zero)
+    )
+  )
+}
