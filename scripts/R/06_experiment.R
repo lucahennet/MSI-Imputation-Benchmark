@@ -57,6 +57,7 @@ export_ext_dataset <- function(
     method_name,
     preprocessing,
     prop,
+    ms_model = "unknown",
     root_dir = "output") {
   
   p_str <- paste0("p", round(prop * 100))
@@ -91,6 +92,7 @@ export_ext_dataset <- function(
   metadata <- list(
     method = method_name,
     missing_proportion = prop,
+    missing_model = ms_model,
     transform = preprocessing$transform,
     scaling = preprocessing$scaling,
     n_pixels = nrow(mat_na),
@@ -111,9 +113,11 @@ import_ext_results <- function(
     coords,
     metric_functions,
     io_root = "output",
-    results_root = file.path(io_root, "results")) {
+    results_root = file.path(io_root, "results")
+) {
   
-  results <- list()
+  # results <- list()
+  imputed_matrices <- list()
   
   method_dirs <- list.dirs(
     results_root,
@@ -121,7 +125,8 @@ import_ext_results <- function(
     full.names = TRUE
   )
   
-  for (method_path in method_dirs) {
+  # for (method_path in method_dirs) {
+  metrics <- map_dfr(method_dirs, function(method_path) {
     
     method_name <- basename(method_path)
     
@@ -139,13 +144,14 @@ import_ext_results <- function(
     # load IO folder once per method (NOT per p_dir anymore)
     io_method_dir <- file.path(io_root, method_name)
     
-    for (file in imp_files) {
+    # for (file in imp_files) {
+    map_dfr(imp_files, function(file) {
       
       cat("Importing:", basename(file), "\n")
       
       # extract p from filename
-      p_str <- stringr::str_extract(basename(file), "p\\d+")
-      prop <- as.numeric(stringr::str_remove(p_str, "p")) / 100
+      p_str <- str_extract(basename(file), "p\\d+")
+      prop <- as.numeric(str_remove(p_str, "p")) / 100
       
       io_p_dir <- file.path(io_method_dir, p_str)
       
@@ -162,12 +168,20 @@ import_ext_results <- function(
         next
       }
       
+      # load preprocessing and mask
       prep <- readRDS(prep_path)
       mask <- !as.matrix(read.csv(mask_path))
       
       mat_imp <- as.matrix(read.csv(file))
       mat_imp <- reverse_preprocessing(mat_imp, prep)
       
+      prop_key <- as.character(prop)
+      if (!(prop_key %in% names(imputed_matrices))) 
+        imputed_matrices[[prop_key]] <<- list()
+      
+      imputed_matrices[[prop_key]][[method_name]] <- mat_imp
+      
+      # compute metrics
       metric_vals <- compute_metrics(
         mat_true,
         mat_imp,
@@ -182,14 +196,19 @@ import_ext_results <- function(
         mask
       )
       
-      results[[length(results) + 1]] <- tibble::tibble(
+      # results[[length(results) + 1]] <- tibble::tibble(
+      tibble(
         method = method_name,
         prop = prop,
         !!!as.list(metric_vals),
         !!!extra_vals
       )
-    }
-  }
+    })
+  })
   
-  bind_rows(results)
+  # return(list(metrics = bind_rows(results), matrices = imputed_matrices))
+  list(
+    metrics  = metrics,
+    matrices = imputed_matrices
+  )
 }

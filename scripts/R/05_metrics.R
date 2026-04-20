@@ -85,16 +85,7 @@ compute_sam <- function(true, pred, mask){
   acos(sum(t*p) / (sqrt(sum(t^2))*sqrt(sum(p^2))))
 }
 
-# build_spatial_weights <- function(coords, k = 6){
-#   
-#   nb <- knn2nb(knearneigh(coords, k = k))
-#   listw <- nb2listw(nb, style = "W")
-#   
-#   listw
-# }
-# 
-# listw <- build_spatial_weights(coords)
-
+# rebuilds spatial weights on every call -> slow?
 compute_moran_preservation <- function(true, pred, coords, k = 6){
   
   # Build spatial weights
