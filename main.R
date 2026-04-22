@@ -71,21 +71,25 @@ source("scripts/R/07_visualisation.R")
 
 # Config ------------------------------------------------------------------
 
-MISSING_PROPS <- c(0.1, 0.4)        # missingness levels to benchmark
-SEED <- 42
-missing_model <- "msi"              # one of: "mcar", "mnar", "hybrid", "msi"
+MISSING_PROPS <- c(0.1, 0.4)         # missingness proportions to benchmark
+SEEDS <- c(42, 123, 456, 789, 1011)  # one replicate per seed
+SEEDS <- c(42, 123)
+missing_model <- "msi"               # one of: "mcar", "mnar", "hybrid", "msi", ...
 
 DATA = "data/MvaExport_10-04-2026_10.23.29.798"
 DATA = "data/ROI_Luca1303"
 
+# Unique identifier for this pipeline run: <missing_model>_<date>, e.g. "msi_2026-04-22"
+RUN_ID <- paste0(missing_model, "_", Sys.Date())
+
 # Load the data
 raw_wide <- assemble_msi_data(DATA) |>
-  distinct(X, Y, .keep_all = TRUE)    # remove duplicate pixels
+  distinct(X, Y, .keep_all = TRUE)  # remove duplicate pixels
 
 FEATURE_RANGE <- 8:ncol(raw_wide)   # which features to load (min = 8, max = 1007)
 # FEATURE_RANGE <- 8:10
 
-dataset_summary(raw_wide, FEATURE_RANGE)
+dataset_summary(raw_wide, FEATURE_RANGE) # check grid dimensions
 
 
 # test <- simulate_MCAR_global(mat_impute, prop = 0.1)
@@ -138,12 +142,11 @@ simulation_fn <- list(
 # Methods -----------------------------------------------------------------
 
 imputation_methods <- list(
-  zero = list(
-    fun = impute_zero,
-    transform = "none",
-    scaling = "none"
-  ),
-  
+  # zero = list(
+  #   fun = impute_zero,
+  #   transform = "none",
+  #   scaling = "none"
+  # ),
   mean = list(
     fun = impute_mean,
     transform = "none",
@@ -159,66 +162,56 @@ imputation_methods <- list(
     transform = "none",
     scaling = "none"
   ),
-
-  missForest = list(
-    fun = impute_missForest,
-    transform = "log1p",
-    scaling = "none"
-  ),
-
-  knn = list(
-    fun = impute_knn,
-    transform = "log1p",
-    scaling = "pareto"
-  ),
-
-  qrilc = list(
-    fun = impute_qrilc,
-    transform = "log1p",
-    scaling = "none"
-  ),
-
-  ppca = list(
-    fun = impute_ppca,
-    transform = "log1p",
-    scaling = "pareto"
-  ),
-
-  bpca = list(
-    fun = impute_bpca,
-    transform = "log1p",
-    scaling = "pareto"
-  ),
-
+  # missForest = list(
+  #   fun = impute_missForest,
+  #   transform = "log1p",
+  #   scaling = "none"
+  # ),
+  # knn = list(
+  #   fun = impute_knn,
+  #   transform = "log1p",
+  #   scaling = "pareto"
+  # ),
+  # qrilc = list(
+  #   fun = impute_qrilc,
+  #   transform = "log1p",
+  #   scaling = "none"
+  # ),
+  # ppca = list(
+  #   fun = impute_ppca,
+  #   transform = "log1p",
+  #   scaling = "pareto"
+  # ),
+  # bpca = list(
+  #   fun = impute_bpca,
+  #   transform = "log1p",
+  #   scaling = "pareto"
+  # ),
   svd = list(
     fun = impute_svd,
     transform = "log1p",
     scaling = "pareto"
-  ),
-
-  nngp = list(
-    fun = impute_nngp,
-    transform = "log1p",
-    scaling = "none"
-  ),
-
-  sp_knn = list(
-    fun = impute_spatial_knn,
-    transform = "log1p",
-    scaling = "none"
-  ),
-
-  gp = list(
-    fun = impute_gp,
-    transform = "log1p",
-    scaling = "none"
-  ),
-
-  idw = list(
-    fun = impute_idw,
-    transform = "log1p",
-    scaling = "none"
-  ),
+  ) # ,
+  # nngp = list(
+  #   fun = impute_nngp,
+  #   transform = "log1p",
+  #   scaling = "none"
+  # ),
+  # sp_knn = list(
+  #   fun = impute_spatial_knn,
+  #   transform = "log1p",
+  #   scaling = "none"
+  # ),
+  # gp = list(
+  #   fun = impute_gp,
+  #   transform = "log1p",
+  #   scaling = "none"
+  # ),
+  # idw = list(
+  #   fun = impute_idw,
+  #   transform = "log1p",
+  #   scaling = "none"
+  # )
 )
 
 external_methods <- list(
@@ -226,10 +219,10 @@ external_methods <- list(
     transform = "log1p",
     scaling   = "range"
   ),
-  ConvGAIN = list(
-    transform = "log1p",
-    scaling   = "range"
-  ),
+  # ConvGAIN = list(
+  #   transform = "log1p",
+  #   scaling   = "range"
+  # ),
   SpatialGAIN = list(
     transform = "log1p",
     scaling   = "range"
@@ -259,47 +252,66 @@ external_methods <- list(
 
 # Run pipeline ------------------------------------------------------------
 
-# set.seed(SEED) # position?
+# results_storage: stores na_matrix + imputed matrices per replicate × prop
+# Indexed as results_storage[[ rep_key ]][[ p_str ]]
+# where rep_key = "r1", "r2", ... (one per seed)
+results_storage <- list()
 
-results_storage <- list()   # stores na_matrix + imputed matrices per prop
+results <- map_dfr(seq_along(SEEDS), function(rep_idx) {
+  seed    <- SEEDS[[rep_idx]]
+  rep_key <- paste0("r", rep_idx) # e.g. "r1", "r2", ...
 
-results <- map_dfr(MISSING_PROPS, function(p) {
-  message("\n── Missing proportion: ", p, " ──────────────────────────")
-  
-  set.seed(SEED)
-  
-  # 1. Simulate missing values
-  mat_na <- simulation_fn(mat_impute, coords, prop = p)
-  
-  # 2. Export for Python methods
-  walk(names(external_methods), function(method_name) {
-  export_ext_dataset(
-    mat_true = mat_impute,
-    mat_na = mat_na,
-    coords = coords,
-    method_name = method_name,
-    preprocessing = external_methods[[method_name]],
-    prop = p,
-    ms_model = missing_model
+  message(
+    "\n══ Replicate ", rep_idx, " / ", length(SEEDS),
+    "  (seed = ", seed, ") ══════════════════════════"
   )
-})
-  
-  # 3. Run R imputation methods
-  exp_output <- run_experiment(
-    mat_true = mat_impute,
-    mat_na   = mat_na,
-    coords   = coords,
-    methods  = imputation_methods,
-    metrics  = metric_functions
-  )
-  
-  # 4. Store matrices for visualisation
-  results_storage[[as.character(p)]] <<- list(
-    na_matrix = mat_na,
-    imputed   = exp_output$matrices
-  )
-  
-  exp_output$metrics |> mutate(prop = p)
+
+  results_storage[[rep_key]] <<- list()
+
+  map_dfr(MISSING_PROPS, function(p) {
+    message("  ── Missing proportion: ", p, " ──────────────────────────")
+
+    # 1. Fix seed immediately before each simulation so each (rep, prop)
+    #   combination is fully reproducible and independent.
+    # Simulate missing values
+    set.seed(seed)
+    mat_na <- simulation_fn(mat_impute, coords, prop = p)
+
+    p_str <- as.character(p)
+
+    # 2. Export for Python methods
+    walk(names(external_methods), function(method_name) {
+      export_ext_dataset(
+        mat_true    = mat_impute,
+        mat_na      = mat_na,
+        coords      = coords,
+        method_name = method_name,
+        preprocessing = external_methods[[method_name]],
+        prop        = p,
+        ms_model    = missing_model,
+        rep_idx     = rep_idx, # <-- new: stamped into folder name + metadata
+        run_id      = RUN_ID
+      )
+    })
+
+    # 3. Run R imputation methods
+    exp_output <- run_experiment(
+      mat_true = mat_impute,
+      mat_na   = mat_na,
+      coords   = coords,
+      methods  = imputation_methods,
+      metrics  = metric_functions
+    )
+
+    # 4. Store matrices for visualisation
+    results_storage[[rep_key]][[p_str]] <<- list(
+      na_matrix = mat_na,
+      imputed   = exp_output$matrices
+    )
+
+    exp_output$metrics |>
+      mutate(prop = p, seed = seed, rep = rep_idx)
+  })
 })
 
 results
@@ -308,7 +320,8 @@ results
 external_results <- import_ext_results(
   mat_true         = mat_impute,
   coords           = coords,
-  metric_functions = metric_functions
+  metric_functions = metric_functions,
+  run_id           = RUN_ID
 )
 
 # 6. Merge metrics
@@ -317,30 +330,33 @@ all_results <- bind_rows(results, external_results$metrics)
 all_results
 
 # 7. Merges matrices into results_storage
-walk(names(external_results$matrices), function(p_str) {
-  # Add the external methods to the 'imputed' sub-list for that proportion
-  results_storage[[p_str]]$imputed <<- c(
-    results_storage[[p_str]]$imputed,
-    external_results$matrices[[p_str]]
-  )
+walk(names(external_results$matrices), function(rep_key) {
+  walk(names(external_results$matrices[[rep_key]]), function(p_str) {
+    results_storage[[rep_key]][[p_str]]$imputed <<- c(
+      results_storage[[rep_key]][[p_str]]$imputed,
+      external_results$matrices[[rep_key]][[p_str]]
+    )
+  })
 })
 
-# Store the results
+
+# Save --------------------------------------------------------------------
+
 experiment_output <- list(
   config = list(
-    dataset = DATA,
+    dataset       = DATA,
     missing_model = missing_model,
     missing_props = MISSING_PROPS,
-    seed = SEED,
-    date = Sys.time()
+    seeds         = SEEDS,
+    n_replicates  = length(SEEDS),
+    run_id        = RUN_ID,
+    date          = Sys.time()
   ),
-  
-  results = results,
-  all_results = all_results,
+  results         = results,
+  all_results     = all_results,
   results_storage = results_storage,
-  
-  coords = coords,
-  feature_names = colnames(mat_impute)
+  coords          = coords,
+  feature_names   = colnames(mat_impute)
 )
 
 dir.create("results", showWarnings = FALSE)
@@ -350,25 +366,32 @@ saveRDS(
   file = file.path(
     "results",
     paste0(
-      "benchmark_",
-      basename(DATA), "_",
-      missing_model, "_",
-      format(Sys.Date(), "%Y-%m-%d"),
-      ".rds"
+      "benchmark_", basename(DATA), "_", RUN_ID,
+      "_", length(SEEDS), "reps.rds"
     )
   )
 )
 
-# Load data from previous experiment
-exp <- readRDS("results/benchmark_ROI_Luca1303_msi_2026-04-17.rds")
 
-# plot_metric(exp$all_results, "NRMSE")
+# Load a previous experiment ----------------------------------------------
+
+list.files(path = "results", pattern = "\\.rds")
+
+exp <- readRDS("results/benchmark_ROI_Luca1303_msi_2026-04-22_2reps.rds")
+
+all_results     <- exp$all_results
+results_storage <- exp$results_storage
+coords          <- exp$coords
+feature_names   <- exp$feature_names
+
+plot_metric(exp$all_results, "NRMSE") # example
 
 
 # Plots -------------------------------------------------------------------
 
 source("scripts/R/07_visualisation.R")   # re-source if iterating on plots only
 
+# Aggregated metric plots (mean ± ribbon across replicates)
 plot_metric(all_results, "NRMSE")
 plot_metric(all_results, "MAE")
 plot_metric(all_results, "CCC")
@@ -381,5 +404,5 @@ plot_runtime_vs_nrmse(all_results)
 plot_spatial_fidelity(all_results)
 plot_spectral_preservation(all_results)
 
-visualise_heatmaps(feature_idx = 20,  mode = "all_methods", target_prop = 0.4, ncol = 4)
-visualise_heatmaps(feature_idx = 50, mode = "all_props",   target_method = "SpatialGAIN", ncol = 3)
+visualise_heatmaps(feature_idx = 20, mode = "all_methods", target_prop = 0.4, ncol = 4, rep_idx = 2)
+visualise_heatmaps(feature_idx = 50, mode = "all_props",   target_method = "svd", ncol = 3, rep_idx = 1)
