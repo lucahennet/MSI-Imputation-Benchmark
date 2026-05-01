@@ -1,18 +1,19 @@
 # =============================================================================
 # 04_preprocessing.R
-# Purpose:  Load, assemble and reshape MSI data from raw ROI files
-# Inputs:   - A root directory containing one TXT subfolder and N CSV subfolders
-# Outputs:  - raw_wide       : wide-format data frame (pixels × features)
-#           - df_visualisation: long-format, TIC-normalised, for plotting
-#           - df_impute      : clean wide matrix ready for imputation
-#           - coords         : data frame of X/Y pixel coordinates
-#           - mat_impute     : numeric matrix (pixels × features), no metadata
-# Depends:  tidyverse, stringr
+# Purpose:  Implement data transformation and scaling functions for MSI datasets, 
+#           along with their inverses for post-imputation reversal.
+# Inputs:   - A numeric matrix (pixels × features) and a method specification list
+# Outputs:  - A list containing the pre-processed matrix, the forward and backward functions
+# Depends:  
 # =============================================================================
 
 
 # Functions ---------------------------------------------------------------
 
+#' Apply specified transformation and scaling to the input matrix, and return the
+#' pre-processed data along with the functions needed to reverse these steps after imputation.
+#' 
+#' Supported transformations: "none", "log1p"
 transformers <- list(
   none = list(
     forward  = function(x) x,
@@ -25,6 +26,10 @@ transformers <- list(
   )
 )
 
+#' Apply specified scaling to the input matrix, and return the scaled data along 
+#' with the parameters needed to reverse the scaling after imputation.
+#' 
+#' Supported scalings: "none", "zscore", "pareto", "range"
 scalers <- list(
   none = list(
     forward = function(x) list(data = x, params = NULL),
@@ -69,6 +74,17 @@ scalers <- list(
   )
 )
 
+#' Main function to apply the specified transformation and scaling to the input matrix.
+#' 
+#' @param mat         Numeric matrix (pixels × features) to be pre-processed
+#' @param method_spec List with elements 'transform' and 'scaling' specifying
+#'                    the desired transformation and scaling methods 
+#'                    (e.g. list(transform = "log1p", scaling = "zscore"))
+#'  @return A list containing:
+#'        - data: The pre-processed matrix ready for imputation
+#'        - transform: The transformation functions (forward and backward)
+#'        - scaler: The scaling functions (forward and backward)
+#'        - scale_params: The parameters needed to reverse the scaling after imputation
 apply_preprocessing <- function(mat, method_spec){
   
   # Transform
@@ -89,6 +105,12 @@ apply_preprocessing <- function(mat, method_spec){
   )
 }
 
+#' Reverse the transformation and scaling applied to the imputed matrix, using the
+#' preprocessing object returned by apply_preprocessing() to access the necessary parameters and functions.
+#' 
+#' @param mat_imp  Numeric matrix (pixels × features) with imputed values, still in pre-processed space
+#' @param prep     The list returned by apply_preprocessing() containing the transform and scaler
+#' @return The imputed matrix transformed back to the original data space, ready for metric computation
 reverse_preprocessing <- function(mat_imp, prep){
   
   # Undo scaling

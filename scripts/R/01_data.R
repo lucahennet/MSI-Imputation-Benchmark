@@ -103,6 +103,11 @@ normalize_msi_data <- function(data_long) {
     select(-RAW.TIC.OR.ROI.sum.peak)
 }
 
+#' Summarise the dataset with key metrics
+#' 
+#' @param raw_wide     Wide tibble from assemble_msi_data()
+#' @param feature_range Integer vector of column indices corresponding to features
+#' @return A tibble summarising dataset dimensions, NA/zero counts and percentages
 dataset_summary <- function(raw_wide, feature_range) {
   n_pixels   <- nrow(raw_wide)
   n_features <- length(feature_range) # eventually remove the first one that do not count

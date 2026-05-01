@@ -1,13 +1,9 @@
 # =============================================================================
 # 03_imputation.R
-# Purpose:  Load, assemble and reshape MSI data from raw ROI files
-# Inputs:   - A root directory containing one TXT subfolder and N CSV subfolders
-# Outputs:  - raw_wide       : wide-format data frame (pixels × features)
-#           - df_visualisation: long-format, TIC-normalised, for plotting
-#           - df_impute      : clean wide matrix ready for imputation
-#           - coords         : data frame of X/Y pixel coordinates
-#           - mat_impute     : numeric matrix (pixels × features), no metadata
-# Depends:  tidyverse, stringr
+# Purpose:  Implement various imputation methods for missing values in MSI data
+# Inputs:   - A numeric matrix with missing values (NA) and optional spatial coordinates
+# Outputs:  - A complete numeric matrix with imputed values replacing NA
+# Depends:  missForest, VIM, imputeLCMD, pcaMethods, NNGP, kernlab, gstat, sp
 # =============================================================================
 
 
@@ -55,7 +51,6 @@ impute_knn <- function(mat_na, coords = NULL){
   as.matrix(res)
 }
 
-# Check the data format!!
 impute_qrilc <- function(mat_na, coords = NULL){
   res <- impute.QRILC(t(mat_na))
   return(t(res[[1]]))
@@ -81,84 +76,89 @@ impute_nngp <- function(data, coords = NULL){
   return(t(res))
 }
 
-# Spatial KNN imputation: average of k nearest neighbours based on spatial distance
+#' Impute missing values using spatial KNN
+#' 
+#' For each missing value, find the k nearest observed pixels based on spatial 
+#' coordinates and impute using their mean.
 impute_spatial_knn <- function(mat_na, coords, k = 5) {
-  
   mat_imp <- mat_na
-  
+
   for (j in seq_len(ncol(mat_na))) {
-    
     missing_idx <- which(is.na(mat_na[, j]))
     observed_idx <- which(!is.na(mat_na[, j]))
-    
+
     for (i in missing_idx) {
-      
       # Euclidean distances to observed points
       dists <- sqrt(
         (coords$X[observed_idx] - coords$X[i])^2 +
           (coords$Y[observed_idx] - coords$Y[i])^2
       )
-      
+
       nn <- observed_idx[order(dists)][1:k]
       mat_imp[i, j] <- mean(mat_na[nn, j], na.rm = TRUE)
     }
   }
-  
+
   mat_imp
 }
 
 # Gaussian Process regression for spatial imputation
+
+#' Impute missing values using Gaussian Process regression based on spatial coordinates
+#' 
+#' For each feature, fit a Gaussian Process model to the observed values and 
+#' predict missing ones based on their spatial coordinates. This method captures 
+#' spatial correlations.
 impute_gp <- function(mat_na, coords) {
-  
   mat_imp <- mat_na
-  
+
   for (j in seq_len(ncol(mat_na))) {
-    
     y <- mat_na[, j]
     obs <- !is.na(y)
-    
+
     if (sum(obs) < 5) next
-    
+
     model <- suppressMessages(
       gausspr(
         x = as.matrix(coords[obs, ]),
         y = y[obs]
       )
     )
-    
+
     pred <- predict(model, as.matrix(coords[!obs, ]))
-    
+
     mat_imp[!obs, j] <- pred
   }
-  
+
   mat_imp
 }
 
-# Inverse Distance Weighting
+#' Impute missing values using Inverse Distance Weighting (IDW) based on spatial coordinates
+#' 
+#' For each feature, use the observed values to predict missing ones by weighting them
+#' inversely by their distance to the missing point.
 impute_idw <- function(mat_na, coords, idp = 2) {
-  
   mat_imp <- mat_na
-  
+
   for (j in seq_len(ncol(mat_na))) {
-    
     df <- data.frame(
       x = coords$X,
       y = coords$Y,
       z = mat_na[, j]
     )
-    
+
     observed <- df[!is.na(df$z), ]
-    missing  <- df[is.na(df$z), ]
-    
+    missing <- df[is.na(df$z), ]
+
     if (nrow(missing) == 0) next
-    
-    coordinates(observed) <- ~x+y
-    coordinates(missing)  <- ~x+y
-    
+
+    coordinates(observed) <- ~ x + y
+    coordinates(missing) <- ~ x + y
+
     idw_res <- idw(z ~ 1, observed, missing, idp = idp)
-    
+
     mat_imp[is.na(mat_na[, j]), j] <- idw_res$var1.pred
   }
-  
+
   mat_imp
 }

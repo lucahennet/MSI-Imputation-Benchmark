@@ -71,12 +71,13 @@ source("scripts/R/07_visualisation.R")
 
 # Config ------------------------------------------------------------------
 
-MISSING_PROPS <- c(0.1, 0.4)         # missingness proportions to benchmark
-SEEDS <- c(42, 123, 456, 789, 1011)  # one replicate per seed
-SEEDS <- c(42, 123)
-missing_model <- "msi"               # one of: "mcar", "mnar", "hybrid", "msi", ...
+MISSING_PROPS <- c(0.1, 0.4)  # missingness proportions to benchmark
+# SEEDS <- c(42, 123, 456, 789, 1011)  # one replicate per seed
+SEEDS <- c(42)
+missing_model <- "msi"  # one of: "mcar", "mnar", "hybrid", "msi", "mcar_g"
 
 DATA = "data/MvaExport_10-04-2026_10.23.29.798"
+DATA = "data/MvaExport_10-04-2026_10.23.29.798_TIC"
 DATA = "data/ROI_Luca1303"
 
 # Unique identifier for this pipeline run: <missing_model>_<date>, e.g. "msi_2026-04-22"
@@ -86,21 +87,10 @@ RUN_ID <- paste0(missing_model, "_", Sys.Date())
 raw_wide <- assemble_msi_data(DATA) |>
   distinct(X, Y, .keep_all = TRUE)  # remove duplicate pixels
 
-FEATURE_RANGE <- 8:ncol(raw_wide)   # which features to load (min = 8, max = 1007)
+FEATURE_RANGE <- 8:ncol(raw_wide)  # which features to load (min = 8, max = 1007)
 # FEATURE_RANGE <- 8:10
 
 dataset_summary(raw_wide, FEATURE_RANGE) # check grid dimensions
-
-
-# test <- simulate_MCAR_global(mat_impute, prop = 0.1)
-# mean(is.na(test))
-# test2 <- simulate_MCAR(mat_impute, prop = 0.1)
-# mean(is.na(test2))
-# test3 <- simulate_MNAR_global(mat_impute, prop = 0.1)
-# mean(is.na(test3))
-# test4 <- simulate_MNAR(mat_impute, prop = 0.1)
-# mean(is.na(test4))
-
 
 feature_cols <- colnames(raw_wide)[FEATURE_RANGE]
 
@@ -118,10 +108,10 @@ df_impute <- raw_wide |>
     X, Y, RAW.TIC.OR.ROI.sum.peak,
     where(~ !any(is.na(.)) && !any(. == 0)) # drop all-NA or all-zero features
   ) |>
-  mutate(across(
-    -c(X, Y, RAW.TIC.OR.ROI.sum.peak),
-    ~ . / RAW.TIC.OR.ROI.sum.peak # TIC normalisation
-  )) |>
+  # mutate(across(
+  #   -c(X, Y, RAW.TIC.OR.ROI.sum.peak),
+  #   ~ . / RAW.TIC.OR.ROI.sum.peak # TIC normalisation !depending on the dataset!
+  # )) |>
   select(-RAW.TIC.OR.ROI.sum.peak)
 
 # Coordinates and numeric matrix
@@ -130,12 +120,11 @@ mat_impute <- df_impute |> select(-X, -Y) |> as.matrix()
 
 # Map string → simulation function
 simulation_fn <- list(
-  mcar   = simulate_MCAR,
-  mnar   = simulate_MNAR,
-  mcar_g = simulate_MCAR_global,
-  mnar_g = simulate_MNAR_global,
-  hybrid = simulate_hybrid_missing,
-  msi    = simulate_msi_missing
+  mcar   = function(mat, coords, prop) simulate_MCAR(mat, prop),
+  mnar   = function(mat, coords, prop) simulate_MNAR(mat, prop),
+  mcar_g = function(mat, coords, prop) simulate_MCAR_global(mat, prop),
+  hybrid = function(mat, coords, prop) simulate_hybrid_missing(mat, total_prop = prop),
+  msi    = function(mat, coords, prop) simulate_msi_missing(mat, coords, prop)
 )[[missing_model]]
 
 
@@ -147,11 +136,11 @@ imputation_methods <- list(
   #   transform = "none",
   #   scaling = "none"
   # ),
-  mean = list(
-    fun = impute_mean,
-    transform = "none",
-    scaling = "none"
-  ),
+  # mean = list(
+  #   fun = impute_mean,
+  #   transform = "none",
+  #   scaling = "none"
+  # ),
   median = list(
     fun = impute_median,
     transform = "none",
@@ -161,7 +150,7 @@ imputation_methods <- list(
     fun = impute_half_min,
     transform = "none",
     scaling = "none"
-  ),
+  )# ,
   # missForest = list(
   #   fun = impute_missForest,
   #   transform = "log1p",
@@ -174,7 +163,7 @@ imputation_methods <- list(
   # ),
   # qrilc = list(
   #   fun = impute_qrilc,
-  #   transform = "log1p",
+  #   transform = "none",
   #   scaling = "none"
   # ),
   # ppca = list(
@@ -187,14 +176,14 @@ imputation_methods <- list(
   #   transform = "log1p",
   #   scaling = "pareto"
   # ),
-  svd = list(
-    fun = impute_svd,
-    transform = "log1p",
-    scaling = "pareto"
-  ) # ,
-  # nngp = list(
-  #   fun = impute_nngp,
+  # svd = list(
+  #   fun = impute_svd,
   #   transform = "log1p",
+  #   scaling = "pareto"
+  # ),
+  # nngp = list(
+  #   fun = impute_nngp, # change the method for nngp!
+  #   transform = "none",
   #   scaling = "none"
   # ),
   # sp_knn = list(
@@ -218,15 +207,15 @@ external_methods <- list(
   GAIN = list(
     transform = "log1p",
     scaling   = "range"
-  ),
+  )# ,
   # ConvGAIN = list(
   #   transform = "log1p",
   #   scaling   = "range"
   # ),
-  SpatialGAIN = list(
-    transform = "log1p",
-    scaling   = "range"
-  ) # ,
+  # SpatialGAIN = list(
+  #   transform = "log1p",
+  #   scaling   = "range"
+  # ),
   #
   # UNET = list(
   #   transform = "log1p",
@@ -259,7 +248,7 @@ results_storage <- list()
 
 results <- map_dfr(seq_along(SEEDS), function(rep_idx) {
   seed    <- SEEDS[[rep_idx]]
-  rep_key <- paste0("r", rep_idx) # e.g. "r1", "r2", ...
+  rep_key <- paste0("r", rep_idx)  # e.g. "r1", "r2", ...
 
   message(
     "\n══ Replicate ", rep_idx, " / ", length(SEEDS),
@@ -271,15 +260,14 @@ results <- map_dfr(seq_along(SEEDS), function(rep_idx) {
   map_dfr(MISSING_PROPS, function(p) {
     message("  ── Missing proportion: ", p, " ──────────────────────────")
 
-    # 1. Fix seed immediately before each simulation so each (rep, prop)
-    #   combination is fully reproducible and independent.
-    # Simulate missing values
+    # 1. Seed is fixed immediately before each simulation so each (rep, prop)
+    #    combination is fully reproducible and independent.
     set.seed(seed)
-    mat_na <- simulation_fn(mat_impute, coords, prop = p)
+    mat_na <- simulation_fn(mat_impute, coords, prop = p)  # simulate missing values
 
     p_str <- as.character(p)
 
-    # 2. Export for Python methods
+    # 2. Export for Python methods (06_experiment)
     walk(names(external_methods), function(method_name) {
       export_ext_dataset(
         mat_true    = mat_impute,
@@ -289,12 +277,12 @@ results <- map_dfr(seq_along(SEEDS), function(rep_idx) {
         preprocessing = external_methods[[method_name]],
         prop        = p,
         ms_model    = missing_model,
-        rep_idx     = rep_idx, # <-- new: stamped into folder name + metadata
+        rep_idx     = rep_idx,
         run_id      = RUN_ID
       )
     })
 
-    # 3. Run R imputation methods
+    # 3. Run R imputation methods (06_experiment)
     exp_output <- run_experiment(
       mat_true = mat_impute,
       mat_na   = mat_na,
@@ -324,7 +312,7 @@ external_results <- import_ext_results(
   run_id           = RUN_ID
 )
 
-# 6. Merge metrics
+# 6. Merge metrics from R and external methods into a single data frame
 all_results <- bind_rows(results, external_results$metrics)
 
 all_results
@@ -361,6 +349,7 @@ experiment_output <- list(
 
 dir.create("results", showWarnings = FALSE)
 
+# For future reproducibility and reference
 saveRDS(
   experiment_output,
   file = file.path(
@@ -377,32 +366,33 @@ saveRDS(
 
 list.files(path = "results", pattern = "\\.rds")
 
-exp <- readRDS("results/benchmark_ROI_Luca1303_msi_2026-04-22_2reps.rds")
+exp <- readRDS("results/benchmark_ROI_Luca1303_msi_2026-04-24_15reps.rds")
+exp <- readRDS("results/benchmark_MvaExport_10-04-2026_10.23.29.798_TIC_msi_2026-04-24_15reps.rds")
 
 all_results     <- exp$all_results
 results_storage <- exp$results_storage
 coords          <- exp$coords
 feature_names   <- exp$feature_names
 
-plot_metric(exp$all_results, "NRMSE") # example
+plot_metric(exp$all_results, "NRMSE", type = "line")  # example
 
 
 # Plots -------------------------------------------------------------------
 
-source("scripts/R/07_visualisation.R")   # re-source if iterating on plots only
+source("scripts/R/07_visualisation.R")
 
 # Aggregated metric plots (mean ± ribbon across replicates)
 plot_metric(all_results, "NRMSE")
 plot_metric(all_results, "MAE")
-plot_metric(all_results, "CCC")
-plot_metric(all_results, "SSIM")
-plot_metric(all_results, "MoranDiff",  y_label = "Mean Abs. Diff. in Moran's I")
+plot_metric(exp$all_results, "CCC", type='bar')
+plot_metric(exp$all_results, "SSIM", type='line')
+plot_metric(exp$all_results, "MoranDiff",  y_label = "Mean Abs. Diff. in Moran's I")
 plot_metric(all_results, "VarRatio",   y_label = "Mean Variance Ratio")
-plot_metric(all_results, "CorStruct",  y_label = "Correlation of Correlation Matrices")
+plot_metric(exp$all_results, "CorStruct",  y_label = "Correlation of Correlation Matrices")
 
-plot_runtime_vs_nrmse(all_results)
-plot_spatial_fidelity(all_results)
-plot_spectral_preservation(all_results)
+plot_runtime_vs_nrmse(exp$all_results)
+plot_spatial_fidelity(exp$all_results)
+plot_spectral_preservation(exp$all_results)
 
-visualise_heatmaps(feature_idx = 20, mode = "all_methods", target_prop = 0.4, ncol = 4, rep_idx = 2)
-visualise_heatmaps(feature_idx = 50, mode = "all_props",   target_method = "svd", ncol = 3, rep_idx = 1)
+visualise_heatmaps(feature_idx = 173, mode = "all_methods", target_prop = 0.4, ncol = 4, rep_idx = 1)
+visualise_heatmaps(feature_idx = 129, mode = "all_props",   target_method = "ppca", ncol = 3, rep_idx = 12)
