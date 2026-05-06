@@ -64,10 +64,12 @@ to_image <- function(values, coords) {
 #' 
 #' @param true A numeric matrix of true values (pixels × features).
 #' @param pred A numeric matrix of predicted values (pixels × features).
-#' @param coords A data frame with columns X and Y indicating the pixel coordinates for each
-#' row in the 'true' and 'pred' matrices. The number of rows in 'true' and 'pred' should match the number of rows in 'coords'.
-#' @return A single numeric value representing the average SSIM across all features. Higher values
-#' indicate greater similarity between the true and predicted images, with a maximum of 1 for identical images.
+#' @param coords A data frame with columns X and Y indicating the pixel coordinates 
+#' for each #' row in the 'true' and 'pred' matrices. The number of rows in 'true' 
+#' and 'pred' should match the number of rows in 'coords'.
+#' @return A single numeric value representing the average SSIM across all features. 
+#' Higher values indicate greater similarity between the true and predicted images, 
+#' with a maximum of 1 for identical images.
 compute_ssim <- function(true, pred, coords) {
   scale_image <- function(x) {
     rng <- range(x, na.rm = TRUE)
@@ -100,8 +102,8 @@ compute_ssim <- function(true, pred, coords) {
 #' 
 #' @param true A numeric matrix of true values (pixels × features).
 #' @param pred A numeric matrix of predicted values (pixels × features).
-#' @param mask A logical matrix of the same dimensions as 'true' and 'pred
-#' indicating which entries to include in the CCC calculation (typically the positions of missing values).
+#' @param mask A logical matrix of the same dimensions as 'true' and 'pred indicating 
+#' which entries to include in the CCC calculation (typically the positions of missing values).
 #' @return A single numeric value representing the CCC for the masked entries. 
 #' Values closer to 1 indicate better agreement between the true and predicted 
 #' values, while values closer to -1 indicate worse agreement.
@@ -202,12 +204,13 @@ compute_variance_ratio <- function(true, pred, mask = NULL) {
 #' @param true A numeric matrix of true values (pixels × features).
 #' @param pred A numeric matrix of predicted values (pixels × features).
 #' @param mask A logical matrix of the same dimensions as 'true' and 'pred
-#' indicating which entries to include in the correlation preservation calculation (typically
-#' the positions of missing values for which we want to assess the imputation). 
+#' indicating which entries to include in the correlation preservation calculation 
+#' (typically the positions of missing values for which we want to assess the imputation). 
 #' If NULL, all entries are used.
-#' @return A single numeric value representing the correlation between the upper triangular
-#' elements of the true and predicted correlation matrices. Values closer to 1 indicate better preservation
-#' of the correlation structure in the imputed data, while values closer to 0 indicate poor preservation.
+#' @return A single numeric value representing the correlation between the upper 
+#' triangular elements of the true and predicted correlation matrices. Values 
+#' closer to 1 indicate better preservation of the correlation structure in the 
+#' imputed data, while values closer to 0 indicate poor preservation.
 compute_correlation_preservation <- function(true, pred, mask = NULL) {
   cor_true <- cor(true)
   cor_pred <- cor(pred)
@@ -264,11 +267,26 @@ metric_functions <- list(
 #' masking (if applicable). This parameter is not used for SSIM and MoranDiff but 
 #' is included for consistency with other metric functions.
 #' @return A list containing the computed SSIM and MoranDiff values.
+# extra_metrics <- function(true, pred, coords, mask) {
+#   list(
+#     SSIM = compute_ssim(true, pred, coords),
+#     MoranDiff = compute_moran_preservation(true, pred, coords)
+#   )
+# }
 extra_metrics <- function(true, pred, coords, mask) {
-  list(
-    SSIM = compute_ssim(true, pred, coords),
-    MoranDiff = compute_moran_preservation(true, pred, coords)
-  )
+  has_spatial_coords <- !is.null(coords) &&
+    is.data.frame(coords) &&
+    all(c("X", "Y") %in% names(coords)) &&
+    is.numeric(coords$X) && is.numeric(coords$Y)
+
+  result <- list()
+
+  if (has_spatial_coords) {
+    result$SSIM <- compute_ssim(true, pred, coords)
+    result$MoranDiff <- compute_moran_preservation(true, pred, coords)
+  }
+
+  result
 }
 
 #' Compute a set of specified metrics for the true and predicted matrices, using 
@@ -283,7 +301,8 @@ extra_metrics <- function(true, pred, coords, mask) {
 #' @param true A numeric matrix of true values (pixels × features).
 #' @param pred A numeric matrix of predicted values (pixels × features).
 #' @param mask A logical matrix of the same dimensions as 'true' and 'pred
-#' indicating which entries to include in the metric calculations (typically the positions of missing values).
+#' indicating which entries to include in the metric calculations (typically the 
+#' positions of missing values). 
 #' @param metrics A character vector of metric names to compute, corresponding to the keys in
 #' the 'metric_functions' list. If NULL, all metrics in the list will be computed.
 #' @return A named numeric vector where each name corresponds to a metric and each value is

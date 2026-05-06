@@ -1,9 +1,9 @@
 # =============================================================================
-# main.R
-# Purpose:  Runs the full MSI imputation benchmark pipeline
+# main_nospatial.R
+# Purpose:  Runs the full MSI imputation benchmark pipeline without spatial methods
 #
 # Pipeline:
-#   1. Load and assemble data          (01_data.R)
+#   1. Load and assemble data          (01_data_nospatial.R)
 #   2. Simulate missing values         (02_simulation.R)
 #   3. Export datasets for Python      (06_experiment.R)
 #   4. Run R imputation methods        (06_experiment.R)
@@ -27,6 +27,7 @@ BiocManager::install(c(
 
 packages <- c(
   "tidyverse",
+  "readxl",
   "stringr",
   "patchwork",
   "missForest",
@@ -45,6 +46,7 @@ new_packages <- packages[!(packages %in% installed.packages()[, "Package"])]
 if (length(new_packages)) install.packages(new_packages)
 
 library(tidyverse)
+library(readxl)
 library(stringr)
 library(patchwork)
 library(missForest) # RF
@@ -62,7 +64,7 @@ library(jsonlite)
 
 # Source modules ----------------------------------------------------------
 
-source("scripts/R/01_data.R")
+source("scripts/R/01_data_nospatial.R")
 source("scripts/R/02_simulation.R")
 source("scripts/R/03_imputation.R")
 source("scripts/R/04_preprocessing.R")
@@ -76,49 +78,50 @@ source("scripts/R/07_visualisation.R")
 MISSING_PROPS <- c(0.1, 0.4)  # missingness proportions to benchmark
 # SEEDS <- c(42, 123, 456, 789, 1011)  # one replicate per seed
 SEEDS <- c(42)
-missing_model <- "msi"  # one of: "mcar", "mnar", "hybrid", "msi", "mcar_g"
-
-DATA = "data/MvaExport_10-04-2026_10.23.29.798"
-DATA = "data/MvaExport_10-04-2026_10.23.29.798_TIC"
-DATA = "data/ROI_Luca1303"
+missing_model <- "mcar"  # one of: "mcar", "mnar", "hybrid", "mcar_g"
 
 # Unique identifier for this pipeline run: <missing_model>_<date>, e.g. "msi_2026-04-22"
 RUN_ID <- paste0(missing_model, "_", Sys.Date())
 
+DATA = "data/20220118_POSNEG_combined_all_samples.xlsx"
+ACQUISITION <- "BOTH"  # "NEG", "POS" or "BOTH"
+
 # Load the data
-raw_wide <- assemble_msi_data(DATA) |>
-  distinct(X, Y, .keep_all = TRUE)  # remove duplicate pixels
+df_all  <- load_nospatial_msi(DATA)
 
-FEATURE_RANGE <- 8:ncol(raw_wide)  # which features to load (min = 8, max = 1007)
-# FEATURE_RANGE <- 8:10
+# Select metadata (no row filtering needed)
+meta <- df_all |> select(Group, Regions, Individual, ROI_num)
 
-dataset_summary(raw_wide, FEATURE_RANGE) # check grid dimensions
+# Choose columns based on ACQUISITION
+if (ACQUISITION == "BOTH") {
+  # Keep all NEG and POS columns
+  mat_impute <- df_all |>
+    select(starts_with("NEG_") | starts_with("POS_")) |>
+    as.matrix()
+} else if (ACQUISITION == "NEG") {
+  # Keep only NEG columns
+  mat_impute <- df_all |>
+    select(starts_with("NEG_")) |>
+    as.matrix()
+} else if (ACQUISITION == "POS") {
+  # Keep only POS columns
+  mat_impute <- df_all |>
+    select(starts_with("POS_")) |>
+    as.matrix()
+}
 
-feature_cols <- colnames(raw_wide)[FEATURE_RANGE]
+message("Matrix dimensions: ", nrow(mat_impute), " rows x ", ncol(mat_impute), " features")
 
-# Long-format, normalised
-# df_visualisation <- raw_wide |>
-#   pivot_msi_long(feature_indices = FEATURE_RANGE) |>
-#   normalize_msi_data()
-# generate_msi_plots(df_visualisation, ncol = 3)
-# -> look where if I still use it or if I can remove it
+dataset_summary_nospatial(mat_impute, meta)
 
-# Wide matrix ready for imputation
-df_impute <- raw_wide |>
-  select(X, Y, RAW.TIC.OR.ROI.sum.peak, all_of(feature_cols)) |>
-  select(
-    X, Y, RAW.TIC.OR.ROI.sum.peak,
-    where(~ !any(is.na(.)) && !any(. == 0)) # drop all-NA or all-zero features
-  ) |>
-  # mutate(across(
-  #   -c(X, Y, RAW.TIC.OR.ROI.sum.peak),
-  #   ~ . / RAW.TIC.OR.ROI.sum.peak # TIC normalisation !depending on the dataset!
-  # )) |>
-  select(-RAW.TIC.OR.ROI.sum.peak)
+# Remove features that already have Nas or all-zeros
+valid_cols <- colSums(is.na(mat_impute)) == 0 & colSums(mat_impute == 0) == 0
+mat_impute <- mat_impute[, valid_cols]
 
-# Coordinates and numeric matrix
-coords     <- df_impute |> select(X, Y)
-mat_impute <- df_impute |> select(-X, -Y) |> as.matrix()
+message(
+  "Matrix dimensions after removing missing values: ", nrow(mat_impute),
+  " rows x ", ncol(mat_impute), " features"
+)
 
 # Map string → simulation function
 simulation_fn <- list(
@@ -138,11 +141,11 @@ imputation_methods <- list(
   #   transform = "none",
   #   scaling = "none"
   # ),
-  # mean = list(
-  #   fun = impute_mean,
-  #   transform = "none",
-  #   scaling = "none"
-  # ),
+  mean = list(
+    fun = impute_mean,
+    transform = "none",
+    scaling = "none"
+  ),
   median = list(
     fun = impute_median,
     transform = "none",
@@ -152,57 +155,42 @@ imputation_methods <- list(
     fun = impute_half_min,
     transform = "none",
     scaling = "none"
-  )# ,
-  # missForest = list(
-  #   fun = impute_missForest,
-  #   transform = "log1p",
-  #   scaling = "none"
-  # ),
-  # knn = list(
-  #   fun = impute_knn,
-  #   transform = "log1p",
-  #   scaling = "pareto"
-  # ),
-  # qrilc = list(
-  #   fun = impute_qrilc,
-  #   transform = "none",
-  #   scaling = "none"
-  # ),
-  # ppca = list(
-  #   fun = impute_ppca,
-  #   transform = "log1p",
-  #   scaling = "pareto"
-  # ),
-  # bpca = list(
-  #   fun = impute_bpca,
-  #   transform = "log1p",
-  #   scaling = "pareto"
-  # ),
-  # svd = list(
-  #   fun = impute_svd,
-  #   transform = "log1p",
-  #   scaling = "pareto"
-  # ),
-  # nngp = list(
-  #   fun = impute_nngp,
-  #   transform = "none",
-  #   scaling = "none"
-  # ),
-  # sp_knn = list(
-  #   fun = impute_spatial_knn,
-  #   transform = "log1p",
-  #   scaling = "none"
-  # ),
-  # gp = list(
-  #   fun = impute_gp,
-  #   transform = "log1p",
-  #   scaling = "none"
-  # ),
-  # idw = list(
-  #   fun = impute_idw,
-  #   transform = "log1p",
-  #   scaling = "none"
-  # )
+  ),
+  missForest = list(
+    fun = impute_missForest,
+    transform = "log1p",
+    scaling = "none"
+  ),
+  knn = list(
+    fun = impute_knn,
+    transform = "log1p",
+    scaling = "pareto"
+  ),
+  qrilc = list(
+    fun = impute_qrilc,
+    transform = "none",
+    scaling = "none"
+  ),
+  ppca = list(
+    fun = impute_ppca,
+    transform = "log1p",
+    scaling = "pareto"
+  ),
+  bpca = list(
+    fun = impute_bpca,
+    transform = "log1p",
+    scaling = "pareto"
+  ),
+  svd = list(
+    fun = impute_svd,
+    transform = "log1p",
+    scaling = "pareto"
+  ),
+  nngp = list(
+    fun = impute_nngp,
+    transform = "none",
+    scaling = "none"
+  )
 )
 
 external_methods <- list(
@@ -345,7 +333,6 @@ experiment_output <- list(
   results         = results,
   all_results     = all_results,
   results_storage = results_storage,
-  coords          = coords,
   feature_names   = colnames(mat_impute)
 )
 
@@ -368,12 +355,10 @@ saveRDS(
 
 list.files(path = "results", pattern = "\\.rds")
 
-exp <- readRDS("results/benchmark_ROI_Luca1303_msi_2026-04-24_15reps.rds")
-exp <- readRDS("results/benchmark_MvaExport_10-04-2026_10.23.29.798_TIC_msi_2026-04-24_15reps.rds")
+exp <- readRDS("results/benchmark_20220118_POSNEG_combined_all_samples.xlsx_mcar_2026-05-06_1reps.rds")
 
 all_results     <- exp$all_results
 results_storage <- exp$results_storage
-coords          <- exp$coords
 feature_names   <- exp$feature_names
 
 plot_metric(exp$all_results, "NRMSE", type = "line")  # example
@@ -387,14 +372,8 @@ source("scripts/R/07_visualisation.R")
 plot_metric(all_results, "NRMSE")
 plot_metric(all_results, "MAE")
 plot_metric(exp$all_results, "CCC", type='bar')
-plot_metric(exp$all_results, "SSIM", type='line')
-plot_metric(exp$all_results, "MoranDiff",  y_label = "Mean Abs. Diff. in Moran's I")
 plot_metric(all_results, "VarRatio",   y_label = "Mean Variance Ratio")
 plot_metric(exp$all_results, "CorStruct",  y_label = "Correlation of Correlation Matrices")
 
 plot_runtime_vs_nrmse(exp$all_results)
-plot_spatial_fidelity(exp$all_results)
 plot_spectral_preservation(exp$all_results)
-
-visualise_heatmaps(feature_idx = 173, mode = "all_methods", target_prop = 0.4, ncol = 4, rep_idx = 1)
-visualise_heatmaps(feature_idx = 129, mode = "all_props",   target_method = "ppca", ncol = 3, rep_idx = 12)

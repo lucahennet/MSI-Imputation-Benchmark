@@ -45,50 +45,125 @@ generate_msi_plots <- function(data_long, ncol = 5) {
 #' @param df        Tidy results data frame (all_results).
 #' @param metric_name  Column name of the metric to plot.
 #' @param y_label   Y-axis label; defaults to metric_name.
-plot_metric <- function(df, metric_name, y_label = NULL) {
+# plot_metric <- function(df, metric_name, y_label = NULL) {
+#   if (is.null(y_label)) y_label <- metric_name
+#   
+#   has_replicates <- "rep" %in% colnames(df) && length(unique(df$rep)) > 1
+#   
+#   if (has_replicates) {
+#     # Aggregate across replicates
+#     agg <- df |>
+#       group_by(method, prop) |>
+#       summarise(
+#         mean_val = mean(.data[[metric_name]], na.rm = TRUE),
+#         sd_val   = sd(.data[[metric_name]],   na.rm = TRUE),
+#         .groups  = "drop"
+#       )
+#     
+#     ggplot(agg, aes(x = prop, y = mean_val, color = method, fill = method)) +
+#       geom_ribbon(aes(ymin = mean_val - sd_val, ymax = mean_val + sd_val),
+#                   alpha = 0.15, color = NA) +
+#       geom_line(alpha = 0.8) +
+#       geom_point(size = 2) +
+#       theme_minimal() +
+#       labs(
+#         title    = paste("Benchmark:", metric_name),
+#         subtitle = paste0("Mean ± SD across ", length(unique(df$rep)), " replicates"),
+#         x        = "Proportion of Missing Values",
+#         y        = y_label,
+#         color    = "Method",
+#         fill     = "Method"
+#       ) +
+#       theme(legend.position = "right")
+#     
+#   } else {
+#     # Single replicate — plain lines
+#     ggplot(df, aes(x = prop, y = .data[[metric_name]], color = method)) +
+#       geom_line(alpha = 0.7) +
+#       geom_point(size = 2) +
+#       theme_minimal() +
+#       labs(
+#         title = paste("Benchmark:", metric_name),
+#         x     = "Proportion of Missing Values",
+#         y     = y_label,
+#         color = "Method"
+#       ) +
+#       theme(legend.position = "right")
+#   }
+# }
+
+plot_metric <- function(df, metric_name, y_label = NULL, type = c("line", "bar")) {
+  type <- match.arg(type)
   if (is.null(y_label)) y_label <- metric_name
   
   has_replicates <- "rep" %in% colnames(df) && length(unique(df$rep)) > 1
+  n_reps         <- length(unique(df$rep))
+  multi_prop     <- length(unique(df$prop)) > 1
   
-  if (has_replicates) {
-    # Aggregate across replicates
-    agg <- df |>
-      group_by(method, prop) |>
-      summarise(
-        mean_val = mean(.data[[metric_name]], na.rm = TRUE),
-        sd_val   = sd(.data[[metric_name]],   na.rm = TRUE),
-        .groups  = "drop"
-      )
-    
-    ggplot(agg, aes(x = prop, y = mean_val, color = method, fill = method)) +
-      geom_ribbon(aes(ymin = mean_val - sd_val, ymax = mean_val + sd_val),
-                  alpha = 0.15, color = NA) +
-      geom_line(alpha = 0.8) +
-      geom_point(size = 2) +
+  # Always aggregate — SD is 0 / NA for a single replicate, which is fine
+  agg <- df |>
+    group_by(method, prop) |>
+    summarise(
+      mean_val = mean(.data[[metric_name]], na.rm = TRUE),
+      sd_val   = if (has_replicates) sd(.data[[metric_name]], na.rm = TRUE) else 0,
+      .groups  = "drop"
+    )
+  
+  subtitle <- if (has_replicates)
+    paste0("Mean \u00b1 SD across ", n_reps, " replicates")
+  else
+    "Single replicate"
+  
+  # ---- Line plot ----------------------------------------------------------
+  if (type == "line") {
+    p <- ggplot(agg, aes(x = prop, y = mean_val, color = method, fill = method)) +
       theme_minimal() +
       labs(
         title    = paste("Benchmark:", metric_name),
-        subtitle = paste0("Mean ± SD across ", length(unique(df$rep)), " replicates"),
+        subtitle = subtitle,
         x        = "Proportion of Missing Values",
         y        = y_label,
-        color    = "Method",
-        fill     = "Method"
+        color    = "Method", fill = "Method"
       ) +
       theme(legend.position = "right")
     
+    if (has_replicates)
+      p <- p + geom_ribbon(aes(ymin = mean_val - sd_val, ymax = mean_val + sd_val),
+                           alpha = 0.15, color = NA)
+    
+    p + geom_line(alpha = 0.8) + geom_point(size = 2)
+    
+    # ---- Bar plot -----------------------------------------------------------
   } else {
-    # Single replicate — plain lines
-    ggplot(df, aes(x = prop, y = .data[[metric_name]], color = method)) +
-      geom_line(alpha = 0.7) +
-      geom_point(size = 2) +
+    # Represent proportion as a factor label so bars are evenly spaced
+    agg <- agg |>
+      mutate(prop_label = paste0(prop * 100, "% missing"))
+    
+    # When only one proportion exists, skip the facet
+    p <- ggplot(agg, aes(x = method, y = mean_val, fill = method)) +
+      geom_col(width = 0.7, alpha = 0.85) +
+      geom_errorbar(
+        aes(ymin = mean_val - sd_val, ymax = mean_val + sd_val),
+        width = 0.25, linewidth = 0.6
+      ) +
       theme_minimal() +
       labs(
-        title = paste("Benchmark:", metric_name),
-        x     = "Proportion of Missing Values",
-        y     = y_label,
-        color = "Method"
+        title    = paste("Benchmark:", metric_name),
+        subtitle = subtitle,
+        x        = NULL,
+        y        = y_label,
+        fill     = "Method"
       ) +
-      theme(legend.position = "right")
+      theme(
+        legend.position  = "none",          # colour is already on the x-axis
+        axis.text.x      = element_text(angle = 35, hjust = 1),
+        panel.grid.major.x = element_blank()
+      )
+    
+    if (multi_prop)
+      p <- p + facet_wrap(~ prop_label, scales = "fixed")
+    
+    p
   }
 }
 
