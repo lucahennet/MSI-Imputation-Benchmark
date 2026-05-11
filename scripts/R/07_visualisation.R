@@ -11,6 +11,14 @@
 
 # Functions ---------------------------------------------------------------
 
+#' Generate per-feature heatmaps for all methods or all proportions.
+#' 
+#' Assumes data_long has columns Feature, X, Y, NormIntensity. Plots one heatmap per feature,
+#' with a unified colour scale across all panels. Missing values (NA) are shown in
+#' magenta to highlight them. The resulting plots are arranged in a grid with ncol columns.
+#' @param data_long A long-format data frame with columns Feature, X, Y, NormIntensity.
+#' @param ncol Number of columns in the facet grid (default: 5).
+#' @return A patchwork object containing the arranged heatmaps.
 generate_msi_plots <- function(data_long, ncol = 5) {
   plot_list <- data_long %>%
     group_split(Feature) %>%
@@ -92,15 +100,25 @@ generate_msi_plots <- function(data_long, ncol = 5) {
 #   }
 # }
 
+#' Plot a single metric aggregated across replicates, with optional line or bar style.
+#' 
+#' When multiple replicates are present (col `rep` in df), draws mean ± 1 SD ribbon 
+#' plus a mean line. Falls back to a plain line + points when only one replicate 
+#' exists (or for runtime which only makes sense as a scatter). When type = "bar", 
+#' shows bars with error bars instead of lines.
+#' @param df Tidy results data frame (all_results).
+#' @param metric_name Column name of the metric to plot.
+#' @param y_label Y-axis label; defaults to metric_name.
+#' @param type "line" (default) or "bar" to choose the plot style.
 plot_metric <- function(df, metric_name, y_label = NULL, type = c("line", "bar")) {
   type <- match.arg(type)
   if (is.null(y_label)) y_label <- metric_name
-  
+
   has_replicates <- "rep" %in% colnames(df) && length(unique(df$rep)) > 1
-  n_reps         <- length(unique(df$rep))
-  multi_prop     <- length(unique(df$prop)) > 1
-  
-  # Always aggregate — SD is 0 / NA for a single replicate, which is fine
+  n_reps <- length(unique(df$rep))
+  multi_prop <- length(unique(df$prop)) > 1
+
+  # Always aggregate — SD is 0 / NA for a single replicate
   agg <- df |>
     group_by(method, prop) |>
     summarise(
@@ -108,37 +126,40 @@ plot_metric <- function(df, metric_name, y_label = NULL, type = c("line", "bar")
       sd_val   = if (has_replicates) sd(.data[[metric_name]], na.rm = TRUE) else 0,
       .groups  = "drop"
     )
-  
-  subtitle <- if (has_replicates)
+
+  subtitle <- if (has_replicates) {
     paste0("Mean \u00b1 SD across ", n_reps, " replicates")
-  else
+  } else {
     "Single replicate"
-  
+  }
+
   # ---- Line plot ----------------------------------------------------------
   if (type == "line") {
     p <- ggplot(agg, aes(x = prop, y = mean_val, color = method, fill = method)) +
       theme_minimal() +
       labs(
-        title    = paste("Benchmark:", metric_name),
+        title = paste("Benchmark:", metric_name),
         subtitle = subtitle,
-        x        = "Proportion of Missing Values",
-        y        = y_label,
-        color    = "Method", fill = "Method"
+        x = "Proportion of Missing Values",
+        y = y_label,
+        color = "Method", fill = "Method"
       ) +
       theme(legend.position = "right")
-    
-    if (has_replicates)
+
+    if (has_replicates) {
       p <- p + geom_ribbon(aes(ymin = mean_val - sd_val, ymax = mean_val + sd_val),
-                           alpha = 0.15, color = NA)
-    
+        alpha = 0.15, color = NA
+      )
+    }
+
     p + geom_line(alpha = 0.8) + geom_point(size = 2)
-    
+
     # ---- Bar plot -----------------------------------------------------------
   } else {
     # Represent proportion as a factor label so bars are evenly spaced
     agg <- agg |>
       mutate(prop_label = paste0(prop * 100, "% missing"))
-    
+
     # When only one proportion exists, skip the facet
     p <- ggplot(agg, aes(x = method, y = mean_val, fill = method)) +
       geom_col(width = 0.7, alpha = 0.85) +
@@ -155,47 +176,144 @@ plot_metric <- function(df, metric_name, y_label = NULL, type = c("line", "bar")
         fill     = "Method"
       ) +
       theme(
-        legend.position  = "none",          # colour is already on the x-axis
-        axis.text.x      = element_text(angle = 35, hjust = 1),
+        legend.position = "none", # colour is already on the x-axis
+        axis.text.x = element_text(angle = 35, hjust = 1),
         panel.grid.major.x = element_blank()
       )
-    
-    if (multi_prop)
-      p <- p + facet_wrap(~ prop_label, scales = "fixed")
-    
+
+    if (multi_prop) {
+      p <- p + facet_wrap(~prop_label, scales = "fixed")
+    }
+
     p
   }
 }
 
-
 #' Accuracy vs. computational complexity scatter.
 #' Uses mean NRMSE and mean runtime across replicates (if present).
+# plot_runtime_vs_nrmse <- function(df) {
+#   
+#   has_replicates <- "rep" %in% colnames(df) && length(unique(df$rep)) > 1
+#   
+#   plot_df <- if (has_replicates) {
+#     df |>
+#       group_by(method, prop) |>
+#       summarise(
+#         NRMSE       = mean(NRMSE,       na.rm = TRUE),
+#         runtime_sec = mean(runtime_sec, na.rm = TRUE),
+#         .groups = "drop"
+#       )
+#   } else {
+#     df
+#   }
+#   
+#   ggplot(plot_df, aes(x = runtime_sec, y = NRMSE, color = method, shape = factor(prop))) +
+#     geom_point(size = 3, alpha = 0.8) +
+#     scale_x_log10() +
+#     theme_minimal() +
+#     labs(
+#       title    = "Accuracy vs. Computational Complexity",
+#       subtitle = if (has_replicates) "Points show mean across replicates" else NULL,
+#       x        = "Runtime (seconds, log scale)",
+#       y        = "NRMSE (lower is better)",
+#       shape    = "Prop. missing"
+#     )
+# }
+
+# plot_runtime_vs_nrmse <- function(df) {
+#   # 1. Average across ALL replicates AND all proportions
+#   # This gives exactly one point per method.
+#   plot_df <- df |>
+#     group_by(method) |>
+#     summarise(
+#       NRMSE        = mean(NRMSE,       na.rm = TRUE),
+#       runtime_sec  = mean(runtime_sec, na.rm = TRUE),
+#       .groups = "drop"
+#     )
+#   
+#   ggplot(plot_df, aes(x = runtime_sec, y = NRMSE, color = method)) +
+#     # Add a shadow/halo to points for better visibility
+#     geom_point(size = 5, alpha = 0.9) +
+#     geom_text(aes(label = method), vjust = -1.2, size = 3, fontface = "bold") +
+#     
+#     # Use log10 scale with easy-to-read breaks (0.1s, 1s, 10s, 100s)
+#     scale_x_log10(
+#       breaks = c(0.001, 0.01, 0.1, 1, 10, 100, 1000),
+#       labels = c("1ms", "10ms", "0.1s", "1s", "10s", "1.6m", "16m")
+#     ) +
+#     
+#     # Add log-ticks to make the log scale visually obvious
+#     annotation_logticks(sides = "b", color = "grey80") +
+#     
+#     theme_minimal() +
+#     theme(legend.position = "none") + # Method names are on the points
+#     labs(
+#       title    = "Global Performance Benchmark",
+#       subtitle = "Averaged across all missingness proportions (0.1 and 0.4)",
+#       x        = "Average Runtime",
+#       y        = "Mean NRMSE (lower is better)"
+#     )
+# }
+
+#' Plot runtime vs. NRMSE, averaging across replicates and proportions to get one 
+#' point per method.
 plot_runtime_vs_nrmse <- function(df) {
+  library(scales)
   
-  has_replicates <- "rep" %in% colnames(df) && length(unique(df$rep)) > 1
+  # 1. Detect data structure for the subtitle
+  n_reps  <- if("rep" %in% colnames(df)) length(unique(df$rep)) else 1
+  n_props <- length(unique(df$prop))
   
-  plot_df <- if (has_replicates) {
-    df |>
-      group_by(method, prop) |>
-      summarise(
-        NRMSE       = mean(NRMSE,       na.rm = TRUE),
-        runtime_sec = mean(runtime_sec, na.rm = TRUE),
-        .groups = "drop"
-      )
-  } else {
-    df
-  }
+  # Create a dynamic subtitle
+  sub_text <- paste0(
+    "Averaged over ", n_reps, " replicate(s) ",
+    "across ", n_props, " missingness level(s) (", 
+    paste(percent(unique(df$prop)), collapse = ", "), ")"
+  )
   
-  ggplot(plot_df, aes(x = runtime_sec, y = NRMSE, color = method, shape = factor(prop))) +
-    geom_point(size = 3, alpha = 0.8) +
-    scale_x_log10() +
+  # 2. Process data: Average replicates, then average proportions
+  plot_df <- df |>
+    group_by(method, prop) |>
+    summarise(
+      m_nrmse   = mean(NRMSE, na.rm = TRUE),
+      m_time    = mean(runtime_sec, na.rm = TRUE),
+      .groups   = "drop"
+    ) |>
+    group_by(method) |>
+    summarise(
+      NRMSE        = mean(m_nrmse),
+      runtime_sec  = mean(m_time),
+      # Calculate range for "stability" visual
+      nrmse_sd     = sd(m_nrmse), 
+      .groups      = "drop"
+    )
+  
+  # 3. Plotting
+  ggplot(plot_df, aes(x = runtime_sec, y = NRMSE, color = method)) +
+    # Add a horizontal "stability line" to show NRMSE variation across props
+    geom_errorbar(aes(xmin = runtime_sec * 0.8, xmax = runtime_sec * 1.2), 
+                   alpha = 0.3, width = 0) +
+    geom_point(size = 5, alpha = 0.9) +
+    geom_text(aes(label = method), vjust = -1.5, size = 3.5, fontface = "bold") +
+    
+    # Improved Log Scale: consistent spacing, readable time units
+    scale_x_log10(
+      breaks = c(0.001, 0.01, 0.1, 1, 10, 60, 300, 1200),
+      labels = c("1ms", "10ms", "0.1s", "1s", "10s", "1m", "5m", "20m")
+    ) +
+    
+    # Aesthetics
     theme_minimal() +
+    theme(
+      legend.position = "none",
+      panel.grid.minor = element_blank(), # Remove messy minor lines
+      # axis.title = element_text(face = "bold")
+    ) +
     labs(
-      title    = "Accuracy vs. Computational Complexity",
-      subtitle = if (has_replicates) "Points show mean across replicates" else NULL,
-      x        = "Runtime (seconds, log scale)",
-      y        = "NRMSE (lower is better)",
-      shape    = "Prop. missing"
+      title    = "Performance vs. Computational Cost",
+      subtitle = sub_text,
+      x        = "Average Runtime (Log Scale)",
+      y        = "Mean NRMSE (Lower is Better)"
     )
 }
 
@@ -232,9 +350,9 @@ plot_spatial_fidelity <- function(df) {
 
 #' Biochemical / spectral preservation: variance ratio vs. correlation structure.
 plot_spectral_preservation <- function(df) {
-  
+
   has_replicates <- "rep" %in% colnames(df) && length(unique(df$rep)) > 1
-  
+
   plot_df <- if (has_replicates) {
     df |>
       group_by(method, prop) |>
@@ -246,7 +364,7 @@ plot_spectral_preservation <- function(df) {
   } else {
     df
   }
-  
+
   ggplot(plot_df, aes(x = VarRatio, y = CorStruct, color = method, shape = factor(prop))) +
     geom_point(size = 5, alpha = 0.7) +
     theme_minimal() +
@@ -258,7 +376,6 @@ plot_spectral_preservation <- function(df) {
       shape    = "Prop. missing"
     )
 }
-
 
 #' Visualise per-feature heatmaps for one replicate.
 #'

@@ -22,7 +22,8 @@ BiocManager::install(version = "3.22", update = FALSE)
 BiocManager::install(c(
   "imputeLCMD",
   "pcaMethods",
-  "msImpute"
+  "msImpute",
+  "MsCoreUtils"
 ), update = FALSE)
 
 packages <- c(
@@ -49,6 +50,7 @@ library(stringr)
 library(patchwork)
 library(missForest) # RF
 library(imputeLCMD) # QRILC
+library(MsCoreUtils) # QRILC
 library(pcaMethods) # PPCA, BPCA, SVM
 library(msImpute) # NNGP
 library(gstat) # IDW
@@ -61,6 +63,8 @@ library(jsonlite)
 
 
 # Source modules ----------------------------------------------------------
+
+setwd("~/05_Studies/Master/Master_thesis/MSI-Imputation-Benchmark")
 
 source("scripts/R/01_data.R")
 source("scripts/R/02_simulation.R")
@@ -165,7 +169,7 @@ imputation_methods <- list(
   # ),
   # qrilc = list(
   #   fun = impute_qrilc,
-  #   transform = "none",
+  #   transform = "log1p",
   #   scaling = "none"
   # ),
   # ppca = list(

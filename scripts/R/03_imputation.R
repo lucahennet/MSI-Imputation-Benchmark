@@ -51,9 +51,14 @@ impute_knn <- function(mat_na, coords = NULL){
   as.matrix(res)
 }
 
-impute_qrilc <- function(mat_na, coords = NULL){
-  res <- impute.QRILC(t(mat_na))
-  return(t(res[[1]]))
+# impute_qrilc <- function(mat_na, coords = NULL){
+#   res <- impute.QRILC(t(mat_na))
+#   return(t(res[[1]]))
+# }
+
+impute_qrilc <- function(mat_na, coords = NULL) {
+  res <- MsCoreUtils::impute_QRILC(mat_na, MARGIN = 2L)
+  return(res)
 }
 
 impute_ppca <- function(mat_na, coords = NULL){
@@ -72,7 +77,7 @@ impute_svd <- function(mat_na, coords = NULL){
 }
 
 impute_nngp <- function(data, coords = NULL){
-  res <- msImpute(t(data), method = "v2")
+  res <- msImpute(t(data), method = "v2") # method!
   return(t(res))
 }
 

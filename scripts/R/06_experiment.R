@@ -10,6 +10,23 @@
 
 # Functions ---------------------------------------------------------------
 
+#' Run the full imputation and evaluation pipeline for a given dataset and set of methods.
+#' 
+#' For each method, applies the specified preprocessing, runs the imputation, 
+#' reverses the preprocessing, and computes metrics. Also collects imputed matrices 
+#' for later use (e.g. export).
+#' @param mat_true The complete matrix without missing values (for metric computation)
+#' @param mat_na   The matrix with missing values (NA) to be imputed
+#' @param coords   Data frame of pixel coordinates (for spatial methods)
+#' @param methods  A named list of method specifications, where each entry is a list with:
+#'                  - fun: the imputation function to call
+#'                  - transform: the name of the transformation to apply (e.g. "log1p")
+#'                  - scaling: the name of the scaling to apply (e.g. "pareto")
+#' @param metrics A named list of metric functions to compute (e.g. RMSE, MAE)
+#' @return A list with:
+#'  Returns a list with:
+#'    $metrics  - tidy data frame with method, runtime, metric values, and
+#'    $matrices - named list of imputed matrices (method name as key)
 run_experiment <- function(mat_true, mat_na, coords, methods, metrics) {
   mask <- is.na(mat_na)
   imputed_matrices <- list()

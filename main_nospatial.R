@@ -22,7 +22,8 @@ BiocManager::install(version = "3.22", update = FALSE)
 BiocManager::install(c(
   "imputeLCMD",
   "pcaMethods",
-  "msImpute"
+  "msImpute",
+  "MsCoreUtils"
 ), update = FALSE)
 
 packages <- c(
@@ -51,6 +52,7 @@ library(stringr)
 library(patchwork)
 library(missForest) # RF
 library(imputeLCMD) # QRILC
+library(MsCoreUtils) # QRILC
 library(pcaMethods) # PPCA, BPCA, SVM
 library(msImpute) # NNGP
 library(gstat) # IDW
@@ -63,6 +65,8 @@ library(jsonlite)
 
 
 # Source modules ----------------------------------------------------------
+
+setwd("~/05_Studies/Master/Master_thesis/MSI-Imputation-Benchmark")
 
 source("scripts/R/01_data_nospatial.R")
 source("scripts/R/02_simulation.R")
@@ -78,7 +82,7 @@ source("scripts/R/07_visualisation.R")
 MISSING_PROPS <- c(0.1, 0.4)  # missingness proportions to benchmark
 # SEEDS <- c(42, 123, 456, 789, 1011)  # one replicate per seed
 SEEDS <- c(42)
-missing_model <- "mcar"  # one of: "mcar", "mnar", "hybrid", "mcar_g"
+missing_model <- "hybrid"  # one of: "mcar", "mnar", "hybrid", "mcar_g"
 
 # Unique identifier for this pipeline run: <missing_model>_<date>, e.g. "msi_2026-04-22"
 RUN_ID <- paste0(missing_model, "_", Sys.Date())
@@ -141,11 +145,11 @@ imputation_methods <- list(
   #   transform = "none",
   #   scaling = "none"
   # ),
-  mean = list(
-    fun = impute_mean,
-    transform = "none",
-    scaling = "none"
-  ),
+  # mean = list(
+  #   fun = impute_mean,
+  #   transform = "none",
+  #   scaling = "none"
+  # ),
   median = list(
     fun = impute_median,
     transform = "none",
@@ -168,7 +172,7 @@ imputation_methods <- list(
   ),
   qrilc = list(
     fun = impute_qrilc,
-    transform = "none",
+    transform = "log1p",
     scaling = "none"
   ),
   ppca = list(
@@ -185,12 +189,12 @@ imputation_methods <- list(
     fun = impute_svd,
     transform = "log1p",
     scaling = "pareto"
-  ),
-  nngp = list(
-    fun = impute_nngp,
-    transform = "none",
-    scaling = "none"
-  )
+  )# ,
+  # nngp = list(
+  #   fun = impute_nngp,
+  #   transform = "none",
+  #   scaling = "none"
+  # )
 )
 
 external_methods <- list(
@@ -355,7 +359,9 @@ saveRDS(
 
 list.files(path = "results", pattern = "\\.rds")
 
-exp <- readRDS("results/benchmark_20220118_POSNEG_combined_all_samples.xlsx_mcar_2026-05-06_1reps.rds")
+exp <- readRDS("results/benchmark_20220118_POSNEG_combined_all_samples.xlsx_mcar_2026-05-07_1reps.rds")
+exp <- readRDS("results/benchmark_20220118_POSNEG_combined_all_samples.xlsx_mnar_2026-05-06_1reps.rds")
+exp <- readRDS("results/benchmark_20220118_POSNEG_combined_all_samples.xlsx_hybrid_2026-05-07_1reps.rds")
 
 all_results     <- exp$all_results
 results_storage <- exp$results_storage
