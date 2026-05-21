@@ -40,7 +40,9 @@ packages <- c(
   "SpatialPack",
   "VIM",
   "spdep",
-  "jsonlite"
+  "jsonlite",
+  "vegan",
+  "cluster"
 )
 
 new_packages <- packages[!(packages %in% installed.packages()[, "Package"])]
@@ -50,18 +52,20 @@ library(tidyverse)
 library(readxl)
 library(stringr)
 library(patchwork)
+library(jsonlite)
 library(missForest) # RF
-library(imputeLCMD) # QRILC
+# library(imputeLCMD) # QRILC
 library(MsCoreUtils) # QRILC
 library(pcaMethods) # PPCA, BPCA, SVM
 library(msImpute) # NNGP
 library(gstat) # IDW
-library(sp) # ?
+# library(sp) # ?
 library(kernlab) # GP
 library(SpatialPack)
 library(VIM) # kNN
 library(spdep) # Moran’s I
-library(jsonlite)
+library(vegan) # Procrustes
+library(cluster) # silhouette
 
 
 # Source modules ----------------------------------------------------------
@@ -75,6 +79,8 @@ source("scripts/R/04_preprocessing.R")
 source("scripts/R/05_metrics.R")
 source("scripts/R/06_experiment.R")
 source("scripts/R/07_visualisation.R")
+# source("scripts/R/08_downstream.R")
+# source("scripts/R/09_downstream_visualisation.R")
 
 
 # Config ------------------------------------------------------------------
@@ -121,6 +127,9 @@ dataset_summary_nospatial(mat_impute, meta)
 # Remove features that already have Nas or all-zeros
 valid_cols <- colSums(is.na(mat_impute)) == 0 & colSums(mat_impute == 0) == 0
 mat_impute <- mat_impute[, valid_cols]
+
+# Checkpoint: ensure that the number of rows in meta matches the number of rows in mat_impute
+stopifnot(nrow(meta) == nrow(mat_impute))
 
 message(
   "Matrix dimensions after removing missing values: ", nrow(mat_impute),
@@ -201,35 +210,7 @@ external_methods <- list(
   GAIN = list(
     transform = "log1p",
     scaling   = "range"
-  )# ,
-  # ConvGAIN = list(
-  #   transform = "log1p",
-  #   scaling   = "range"
-  # ),
-  # SpatialGAIN = list(
-  #   transform = "log1p",
-  #   scaling   = "range"
-  # ),
-  #
-  # UNET = list(
-  #   transform = "log1p",
-  #   scaling   = "zscore"
-  # ),
-  #
-  # AUTOENCODER = list(
-  #   transform = "log1p",
-  #   scaling   = "zscore"
-  # ),
-  #
-  # DIFFUSION = list(
-  #   transform = "log1p",
-  #   scaling   = "zscore"
-  # ),
-  #
-  # KRIGING = list(
-  #   transform = "log1p",
-  #   scaling   = "none"
-  # )
+  )
 )
 
 
@@ -241,8 +222,8 @@ external_methods <- list(
 results_storage <- list()
 
 results <- map_dfr(seq_along(SEEDS), function(rep_idx) {
-  seed    <- SEEDS[[rep_idx]]
-  rep_key <- paste0("r", rep_idx)  # e.g. "r1", "r2", ...
+  seed <- SEEDS[[rep_idx]]
+  rep_key <- paste0("r", rep_idx) # e.g. "r1", "r2", ...
 
   message(
     "\n══ Replicate ", rep_idx, " / ", length(SEEDS),
@@ -257,22 +238,22 @@ results <- map_dfr(seq_along(SEEDS), function(rep_idx) {
     # 1. Seed is fixed immediately before each simulation so each (rep, prop)
     #    combination is fully reproducible and independent.
     set.seed(seed)
-    mat_na <- simulation_fn(mat_impute, coords, prop = p)  # simulate missing values
+    mat_na <- simulation_fn(mat_impute, coords, prop = p) # simulate missing values
 
     p_str <- as.character(p)
 
     # 2. Export for Python methods (06_experiment)
     walk(names(external_methods), function(method_name) {
       export_ext_dataset(
-        mat_true    = mat_impute,
-        mat_na      = mat_na,
-        coords      = coords,
+        mat_true = mat_impute,
+        mat_na = mat_na,
+        coords = coords,
         method_name = method_name,
         preprocessing = external_methods[[method_name]],
-        prop        = p,
-        ms_model    = missing_model,
-        rep_idx     = rep_idx,
-        run_id      = RUN_ID
+        prop = p,
+        ms_model = missing_model,
+        rep_idx = rep_idx,
+        run_id = RUN_ID
       )
     })
 
@@ -367,7 +348,7 @@ all_results     <- exp$all_results
 results_storage <- exp$results_storage
 feature_names   <- exp$feature_names
 
-plot_metric(exp$all_results, "NRMSE", type = "line")  # example
+plot_metric(exp$all_results, "NRMSE", type = "line")  # example/test
 
 
 # Plots -------------------------------------------------------------------
@@ -383,3 +364,71 @@ plot_metric(exp$all_results, "CorStruct",  y_label = "Correlation of Correlation
 
 plot_runtime_vs_nrmse(exp$all_results)
 plot_spectral_preservation(exp$all_results)
+
+
+# Downstream analyses -------------------------------------------------------
+
+source("scripts/R/08_downstream.R")
+source("scripts/R/09_downstream_visualisation.R")
+
+# -- Config -----------------------------------------------------------------
+# Which contrast to use for DE (must be a column in meta).
+# For Portal vs Central use contrast_col = "Regions".
+DS_CONTRAST <- "Group"
+DS_LEVELS   <- NULL  # NULL → first two factor levels; or e.g. c("Control", "NASH.Fibrosis")
+
+# -- Ground truth -----------------------------------------------------------
+message("\n══ Ground truth downstream analyses ══════════════════════════")
+gt_downstream <- run_all_downstream(
+  mat          = mat_impute,
+  meta         = meta,
+  contrast_col = DS_CONTRAST,
+  de_levels    = DS_LEVELS
+)
+
+# -- Comparison across all methods × props × replicates --------------------
+message("\n══ Downstream comparisons ═════════════════════════════════════")
+downstream_results <- compute_downstream_comparison(
+  results_storage = results_storage,
+  meta            = meta,
+  ground_truth    = gt_downstream,
+  contrast_col    = DS_CONTRAST,
+  de_levels       = DS_LEVELS
+)
+
+downstream_results$metrics  # inspect tidy table
+
+# -- Save -------------------------------------------------------------------
+experiment_output$downstream <- downstream_results
+saveRDS(
+  experiment_output,
+  file = file.path(
+    "results",
+    paste0("benchmark_", basename(DATA), "_", RUN_ID, "_", length(SEEDS), "reps.rds")
+  )
+)
+
+# -- Plots ------------------------------------------------------------------
+
+# PCA
+plot_pca_overlay(downstream_results, gt_downstream, target_prop = 0.1, rep_idx = 1)
+plot_pca_overlay(downstream_results, gt_downstream, target_prop = 0.4, rep_idx = 1)
+plot_pca_overlay(downstream_results, gt_downstream, target_prop = 0.4, colour_by = "Regions")
+plot_procrustes(downstream_results)
+
+# Differential
+plot_de_comparisons(downstream_results)
+
+# Clustering
+plot_clustering_metrics(downstream_results)
+
+# Network
+plot_network_metrics(downstream_results)
+
+# All-in-one summary
+plot_downstream_summary(downstream_results, target_prop = 0.1)
+plot_downstream_summary(downstream_results, target_prop = 0.4)
+
+# Individual metrics via the existing plot_metric() from 07_visualisation.R
+plot_metric(downstream_results$metrics, "ProcrustesSS",  y_label = "Procrustes SS (lower = better)")
+plot_metric(downstream_results$metrics, "EdgeJaccard",   y_label = "Edge Jaccard (higher = better)")

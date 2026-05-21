@@ -39,7 +39,9 @@ packages <- c(
   "SpatialPack",
   "VIM",
   "spdep",
-  "jsonlite"
+  "jsonlite",
+  "vegan",
+  "cluster"
 )
 
 new_packages <- packages[!(packages %in% installed.packages()[, "Package"])]
@@ -48,18 +50,20 @@ if (length(new_packages)) install.packages(new_packages)
 library(tidyverse)
 library(stringr)
 library(patchwork)
+library(jsonlite)
 library(missForest) # RF
-library(imputeLCMD) # QRILC
+# library(imputeLCMD) # QRILC
 library(MsCoreUtils) # QRILC
 library(pcaMethods) # PPCA, BPCA, SVM
 library(msImpute) # NNGP
 library(gstat) # IDW
-library(sp) # ?
+# library(sp) # ?
 library(kernlab) # GP
 library(SpatialPack)
 library(VIM) # kNN
 library(spdep) # Moran’s I
-library(jsonlite)
+library(vegan) # Procrustes
+library(cluster) # silhouette
 
 
 # Source modules ----------------------------------------------------------
@@ -73,6 +77,8 @@ source("scripts/R/04_preprocessing.R")
 source("scripts/R/05_metrics.R")
 source("scripts/R/06_experiment.R")
 source("scripts/R/07_visualisation.R")
+# source("scripts/R/08_downstream.R")
+# source("scripts/R/09_downstream_visualisation.R")
 
 
 # Config ------------------------------------------------------------------
@@ -213,35 +219,7 @@ external_methods <- list(
   GAIN = list(
     transform = "log1p",
     scaling   = "range"
-  )# ,
-  # ConvGAIN = list(
-  #   transform = "log1p",
-  #   scaling   = "range"
-  # ),
-  # SpatialGAIN = list(
-  #   transform = "log1p",
-  #   scaling   = "range"
-  # ),
-  #
-  # UNET = list(
-  #   transform = "log1p",
-  #   scaling   = "zscore"
-  # ),
-  #
-  # AUTOENCODER = list(
-  #   transform = "log1p",
-  #   scaling   = "zscore"
-  # ),
-  #
-  # DIFFUSION = list(
-  #   transform = "log1p",
-  #   scaling   = "zscore"
-  # ),
-  #
-  # KRIGING = list(
-  #   transform = "log1p",
-  #   scaling   = "none"
-  # )
+  )
 )
 
 
@@ -253,8 +231,8 @@ external_methods <- list(
 results_storage <- list()
 
 results <- map_dfr(seq_along(SEEDS), function(rep_idx) {
-  seed    <- SEEDS[[rep_idx]]
-  rep_key <- paste0("r", rep_idx)  # e.g. "r1", "r2", ...
+  seed <- SEEDS[[rep_idx]]
+  rep_key <- paste0("r", rep_idx) # e.g. "r1", "r2", ...
 
   message(
     "\n══ Replicate ", rep_idx, " / ", length(SEEDS),
@@ -269,22 +247,22 @@ results <- map_dfr(seq_along(SEEDS), function(rep_idx) {
     # 1. Seed is fixed immediately before each simulation so each (rep, prop)
     #    combination is fully reproducible and independent.
     set.seed(seed)
-    mat_na <- simulation_fn(mat_impute, coords, prop = p)  # simulate missing values
+    mat_na <- simulation_fn(mat_impute, coords, prop = p) # simulate missing values
 
     p_str <- as.character(p)
 
     # 2. Export for Python methods (06_experiment)
     walk(names(external_methods), function(method_name) {
       export_ext_dataset(
-        mat_true    = mat_impute,
-        mat_na      = mat_na,
-        coords      = coords,
+        mat_true = mat_impute,
+        mat_na = mat_na,
+        coords = coords,
         method_name = method_name,
         preprocessing = external_methods[[method_name]],
-        prop        = p,
-        ms_model    = missing_model,
-        rep_idx     = rep_idx,
-        run_id      = RUN_ID
+        prop = p,
+        ms_model = missing_model,
+        rep_idx = rep_idx,
+        run_id = RUN_ID
       )
     })
 
@@ -380,7 +358,7 @@ results_storage <- exp$results_storage
 coords          <- exp$coords
 feature_names   <- exp$feature_names
 
-plot_metric(exp$all_results, "NRMSE", type = "line")  # example
+plot_metric(exp$all_results, "NRMSE", type = "line")  # example/test
 
 
 # Plots -------------------------------------------------------------------
@@ -402,3 +380,70 @@ plot_spectral_preservation(exp$all_results)
 
 visualise_heatmaps(feature_idx = 173, mode = "all_methods", target_prop = 0.4, ncol = 4, rep_idx = 1)
 visualise_heatmaps(feature_idx = 129, mode = "all_props",   target_method = "ppca", ncol = 3, rep_idx = 12)
+
+
+# Downstream analyses -------------------------------------------------------
+
+source("scripts/R/08_downstream.R")
+source("scripts/R/09_downstream_visualisation.R")
+
+# -- Config -----------------------------------------------------------------
+# The spatial pipeline has no group/region labels, so DE is skipped.
+# DS_CONTRAST <- NULL
+# DS_LEVELS   <- NULL
+
+# -- Ground truth -----------------------------------------------------------
+message("\n══ Ground truth downstream analyses ══════════════════════════")
+gt_downstream <- run_all_downstream(
+  mat          = mat_impute,
+  meta         = coords,         # coords (X, Y) passed as meta for PCA colouring
+  contrast_col = "Group",        # will be silently skipped: "Group" not in coords
+  de_levels    = NULL,
+  cor_threshold = 0.7
+)
+
+# -- Comparison across all methods × props × replicates --------------------
+message("\n══ Downstream comparisons ═════════════════════════════════════")
+downstream_results <- compute_downstream_comparison(
+  results_storage = results_storage,
+  meta            = coords,
+  ground_truth    = gt_downstream,
+  contrast_col    = "Group",
+  de_levels       = NULL
+)
+
+downstream_results$metrics  # inspect tidy table
+
+# -- Save -------------------------------------------------------------------
+experiment_output$downstream <- downstream_results
+saveRDS(
+  experiment_output,
+  file = file.path(
+    "results",
+    paste0("benchmark_", basename(DATA), "_", RUN_ID, "_", length(SEEDS), "reps.rds")
+  )
+)
+
+# -- Plots ------------------------------------------------------------------
+
+# PCA
+plot_pca_overlay(downstream_results, gt_downstream, target_prop = 0.1, rep_idx = 1)
+plot_pca_overlay(downstream_results, gt_downstream, target_prop = 0.4, rep_idx = 1)
+plot_procrustes(downstream_results)
+
+# Differential
+plot_de_comparisons(downstream_results)
+
+# Clustering
+plot_clustering_metrics(downstream_results)
+
+# Network
+plot_network_metrics(downstream_results)
+
+# All-in-one summary
+plot_downstream_summary(downstream_results, target_prop = 0.1)
+plot_downstream_summary(downstream_results, target_prop = 0.4)
+
+# Individual metrics via the existing plot_metric() from 07_visualisation.R
+plot_metric(downstream_results$metrics, "ProcrustesSS",  y_label = "Procrustes SS (lower = better)")
+plot_metric(downstream_results$metrics, "EdgeJaccard",   y_label = "Edge Jaccard (higher = better)")
