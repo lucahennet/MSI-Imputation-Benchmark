@@ -407,3 +407,4 @@ plot_downstream_summary(downstream_results, target_prop = 0.4)
 # Individual metrics via the existing plot_metric() from 07_visualisation.R
 plot_metric(downstream_results$metrics, "ProcrustesSS",  y_label = "Procrustes SS (lower = better)")
 plot_metric(downstream_results$metrics, "EdgeJaccard",   y_label = "Edge Jaccard (higher = better)")
+plot_metric(downstream_results$metrics, "FeatureVarCor", y_label = "Per-feature Variance Correlation (Higher = Better)")
