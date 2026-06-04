@@ -9,66 +9,33 @@
 #   4. Run R imputation methods        (06_experiment.R)
 #   5. Import external results         (06_experiment.R)
 #   6. Combine and plot metrics        (07_visualisation.R)
+#   7. Run downstream analyses         (08_downstream.R). 
 # =============================================================================
 
 
 # Dependencies ------------------------------------------------------------
 
-if (!require("BiocManager", quietly = TRUE)) {
-  install.packages("BiocManager")
-}
-BiocManager::install(version = "3.22", update = FALSE)
-
-BiocManager::install(c(
-  "imputeLCMD",
-  "pcaMethods",
-  "msImpute",
-  "MsCoreUtils"
-), update = FALSE)
-
-packages <- c(
-  "tidyverse",
-  "stringr",
-  "patchwork",
-  "missForest",
-  "pcaMethods",
-  "msImpute",
-  "gstat",
-  "sp",
-  "kernlab",
-  "SpatialPack",
-  "VIM",
-  "spdep",
-  "jsonlite",
-  "vegan",
-  "cluster"
-)
-
-new_packages <- packages[!(packages %in% installed.packages()[, "Package"])]
-if (length(new_packages)) install.packages(new_packages)
-
+# Core Environment Setup
 library(tidyverse)
-library(stringr)
 library(patchwork)
 library(jsonlite)
+
+# Pipeline-specific
 library(missForest) # RF
-# library(imputeLCMD) # QRILC
-library(MsCoreUtils) # QRILC
-library(pcaMethods) # PPCA, BPCA, SVM
-library(msImpute) # NNGP
 library(gstat) # IDW
-# library(sp) # ?
 library(kernlab) # GP
 library(SpatialPack)
-library(VIM) # kNN
+library(VIM) # KNN
 library(spdep) # Moran’s I
 library(vegan) # Procrustes
 library(cluster) # silhouette
 
+# Pipeline-specific (BiocManager)
+library(pcaMethods) # PPCA, BPCA, SVM
+library(MsCoreUtils) # QRILC
+
 
 # Source modules ----------------------------------------------------------
-
-setwd("~/05_Studies/Master/Master_thesis/MSI-Imputation-Benchmark")
 
 source("scripts/R/01_data.R")
 source("scripts/R/02_simulation.R")
@@ -76,16 +43,13 @@ source("scripts/R/03_imputation.R")
 source("scripts/R/04_preprocessing.R")
 source("scripts/R/05_metrics.R")
 source("scripts/R/06_experiment.R")
-source("scripts/R/07_visualisation.R")
-# source("scripts/R/08_downstream.R")
-# source("scripts/R/09_downstream_visualisation.R")
 
 
 # Config ------------------------------------------------------------------
 
 MISSING_PROPS <- c(0.1, 0.4)  # missingness proportions to benchmark
+SEEDS <- 42
 # SEEDS <- c(42, 123, 456, 789, 1011)  # one replicate per seed
-SEEDS <- c(42)
 missing_model <- "msi"  # one of: "mcar", "mnar", "hybrid", "msi", "mcar_g"
 
 DATA = "data/MvaExport_10-04-2026_10.23.29.798"
@@ -120,10 +84,12 @@ df_impute <- raw_wide |>
     X, Y, RAW.TIC.OR.ROI.sum.peak,
     where(~ !any(is.na(.)) && !any(. == 0)) # drop all-NA or all-zero features
   ) |>
-  # mutate(across(
-  #   -c(X, Y, RAW.TIC.OR.ROI.sum.peak),
-  #   ~ . / RAW.TIC.OR.ROI.sum.peak # TIC normalisation !depending on the dataset!
-  # )) |>
+  # facultative part
+  mutate(across(
+    -c(X, Y, RAW.TIC.OR.ROI.sum.peak),
+    ~ . / RAW.TIC.OR.ROI.sum.peak # TIC normalisation !depending on the dataset!
+  )) |>
+  # end
   select(-RAW.TIC.OR.ROI.sum.peak)
 
 # Coordinates and numeric matrix
@@ -350,15 +316,22 @@ saveRDS(
 
 list.files(path = "results", pattern = "\\.rds")
 
-exp <- readRDS("results/benchmark_ROI_Luca1303_msi_2026-04-24_15reps.rds")
-exp <- readRDS("results/benchmark_MvaExport_10-04-2026_10.23.29.798_TIC_msi_2026-04-24_15reps.rds")
+exp <- readRDS("results/benchmark_MvaExport_10-04-2026_10.23.29.798_TIC_mcar_2026-05-27_20reps.rds")
+exp <- readRDS("results/benchmark_MvaExport_10-04-2026_10.23.29.798_TIC_mnar_2026-05-27_20reps.rds")
+exp <- readRDS("results/benchmark_MvaExport_10-04-2026_10.23.29.798_TIC_hybrid_2026-05-27_20reps.rds")
+exp <- readRDS("results/benchmark_MvaExport_10-04-2026_10.23.29.798_TIC_msi_2026-05-27_20reps.rds")
+
+exp <- readRDS("results/benchmark_ROI_Luca1303_mcar_2026-06-01_20reps.rds")
+exp <- readRDS("results/benchmark_ROI_Luca1303_mnar_2026-06-01_20reps.rds")
+exp <- readRDS("results/benchmark_ROI_Luca1303_hybrid_2026-06-01_20reps.rds")
+exp <- readRDS("results/benchmark_ROI_Luca1303_msi_2026-06-01_20reps.rds")
+
+exp <- readRDS("results/benchmark_ROI_Luca1303_msi_2026-04-23_5reps.rds")
 
 all_results     <- exp$all_results
 results_storage <- exp$results_storage
 coords          <- exp$coords
 feature_names   <- exp$feature_names
-
-plot_metric(exp$all_results, "NRMSE", type = "line")  # example/test
 
 
 # Plots -------------------------------------------------------------------
@@ -378,8 +351,8 @@ plot_runtime_vs_nrmse(exp$all_results)
 plot_spatial_fidelity(exp$all_results)
 plot_spectral_preservation(exp$all_results)
 
-visualise_heatmaps(feature_idx = 173, mode = "all_methods", target_prop = 0.4, ncol = 4, rep_idx = 1)
-visualise_heatmaps(feature_idx = 129, mode = "all_props",   target_method = "ppca", ncol = 3, rep_idx = 12)
+visualise_heatmaps(feature_idx = 100, mode = "all_methods", target_prop = 0.3,     ncol = 4, rep_idx = 6)
+visualise_heatmaps(feature_idx = 9,  mode = "all_props",   target_method = "BPCA", ncol = 3, rep_idx = 10)
 
 
 # Downstream analyses -------------------------------------------------------
@@ -415,14 +388,24 @@ downstream_results <- compute_downstream_comparison(
 downstream_results$metrics  # inspect tidy table
 
 # -- Save -------------------------------------------------------------------
-experiment_output$downstream <- downstream_results
+dir.create("results/downstream", showWarnings = FALSE)
+
+# downstream_results <- downstream_results
 saveRDS(
-  experiment_output,
+  downstream_results,
   file = file.path(
-    "results",
-    paste0("benchmark_", basename(DATA), "_", RUN_ID, "_", length(SEEDS), "reps.rds")
+    "results/downstream",
+    paste0(
+      "downstream_", basename(DATA), "_", RUN_ID,
+      "_", length(SEEDS), "reps.rds"
+    )
   )
 )
+
+# -- Load a previous experiment ---------------------------------------------
+list.files(path = "results/downstream", pattern = "\\.rds")
+
+downstream_results <- readRDS("results/downstream/downstream_MvaExport_10-04-2026_10.23.29.798_TIC_msi_2026-05-27_1reps.rds")
 
 # -- Plots ------------------------------------------------------------------
 
@@ -447,3 +430,5 @@ plot_downstream_summary(downstream_results, target_prop = 0.4)
 # Individual metrics via the existing plot_metric() from 07_visualisation.R
 plot_metric(downstream_results$metrics, "ProcrustesSS",  y_label = "Procrustes SS (lower = better)")
 plot_metric(downstream_results$metrics, "EdgeJaccard",   y_label = "Edge Jaccard (higher = better)")
+plot_metric(downstream_results$metrics, "FeatureVarCor", y_label = "Per-feature Variance Correlation (Higher = Better)")
+# plot_metric(downstream_results$metrics, "NMF_SpatialCor", y_label = "NMF Spatial Map Preservation (Higher = Better)")

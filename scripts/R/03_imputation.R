@@ -71,6 +71,11 @@ impute_bpca <- function(mat_na, coords = NULL){
   t(completeObs(res))
 }
 
+# impute_bpca <- function(mat_na, coords = NULL) {
+#   res <- MsCoreUtils::impute_bpca(mat_na, MARGIN = 2L)
+#   return(res)
+# }
+
 impute_svd <- function(mat_na, coords = NULL){
   res <- pca(t(mat_na), method = "svdImpute", nPcs = 5)
   return(t(completeObs(res)))
