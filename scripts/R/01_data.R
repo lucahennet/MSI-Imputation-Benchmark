@@ -111,8 +111,7 @@ normalize_msi_data <- function(data_long) {
 dataset_summary <- function(raw_wide, feature_range) {
   n_pixels   <- nrow(raw_wide)
   n_features <- length(feature_range) # eventually remove the first one that do not count
-  pixel_grid <- paste0(max(raw_wide$X), "x", max(raw_wide$Y))
-  
+
   raw_subset <- raw_wide[, feature_range]
   
   total_cells   <- n_pixels * n_features
@@ -135,14 +134,14 @@ dataset_summary <- function(raw_wide, feature_range) {
   
   tibble(
     Metric = c(
-      "Total Pixels", "Total Features", "Grid Dimensions",
+      "Total Pixels", "Total Features",
       "Total NAs", "NA Percentage",
       "Features with NAs", "Features (cols) with NAs (%)",
-      "Total Zeros (LOD)", "Zero Percentage", "Features with Zeros",
+      "Total Zeros", "Zero Percentage", "Features with Zeros",
       "Features (cols) with Zeros (%)", "Rows with Zeros", "Rows with Zeros (%)"
     ),
     Value = c(
-      as.character(n_pixels), as.character(n_features), pixel_grid,
+      as.character(n_pixels), as.character(n_features),
       as.character(na_count), sprintf("%.2f%%", na_perc),
       as.character(num_cols_with_na), sprintf("%.2f%%", perc_cols_with_na),
       as.character(zero_count), sprintf("%.2f%%", zero_perc), as.character(num_cols_with_zero),

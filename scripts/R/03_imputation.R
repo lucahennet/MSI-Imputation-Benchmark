@@ -62,12 +62,12 @@ impute_qrilc <- function(mat_na, coords = NULL) {
 }
 
 impute_ppca <- function(mat_na, coords = NULL){
-  res <- pca(t(mat_na), method = "ppca", nPcs = 5)
+  res <- pca(t(mat_na), method = "ppca", nPcs = 2)
   t(completeObs(res))
 }
 
 impute_bpca <- function(mat_na, coords = NULL){
-  res <- pca(t(mat_na), method = "bpca", nPcs = 5)
+  res <- pca(t(mat_na), method = "bpca", nPcs = 2)
   t(completeObs(res))
 }
 

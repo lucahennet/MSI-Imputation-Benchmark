@@ -24,7 +24,7 @@ library(jsonlite)
 library(missForest) # RF
 library(gstat) # IDW
 library(kernlab) # GP
-library(SpatialPack)
+library(SpatialPack) # SSIM
 library(VIM) # KNN
 library(spdep) # Moran’s I
 library(vegan) # Procrustes
@@ -52,9 +52,12 @@ SEEDS <- 42
 # SEEDS <- c(42, 123, 456, 789, 1011)  # one replicate per seed
 missing_model <- "msi"  # one of: "mcar", "mnar", "hybrid", "msi", "mcar_g"
 
-DATA = "data/MvaExport_10-04-2026_10.23.29.798"
+# DATA = "data/MvaExport_10-04-2026_10.23.29.798"
 DATA = "data/MvaExport_10-04-2026_10.23.29.798_TIC"
 DATA = "data/ROI_Luca1303"
+
+# DATA = "data/MvaExport_30-06-2026_11.36.12.551_fib"
+# DATA = "data/MvaExport_30-06-2026_12.04.46.174_norm"
 
 # Unique identifier for this pipeline run: <missing_model>_<date>, e.g. "msi_2026-04-22"
 RUN_ID <- paste0(missing_model, "_", Sys.Date())
@@ -66,13 +69,13 @@ raw_wide <- assemble_msi_data(DATA) |>
 FEATURE_RANGE <- 8:ncol(raw_wide)  # which features to load (min = 8, max = 1007)
 # FEATURE_RANGE <- 8:10
 
-dataset_summary(raw_wide, FEATURE_RANGE) # check grid dimensions
+dataset_summary(raw_wide, FEATURE_RANGE)
 
 feature_cols <- colnames(raw_wide)[FEATURE_RANGE]
 
 # Long-format, normalised
 # df_visualisation <- raw_wide |>
-#   pivot_msi_long(feature_indices = FEATURE_RANGE) |>
+#   pivot_msi_long(feature_indices = 1995:1997) |>
 #   normalize_msi_data()
 # generate_msi_plots(df_visualisation, ncol = 3)
 # -> look where if I still use it or if I can remove it
@@ -84,12 +87,12 @@ df_impute <- raw_wide |>
     X, Y, RAW.TIC.OR.ROI.sum.peak,
     where(~ !any(is.na(.)) && !any(. == 0)) # drop all-NA or all-zero features
   ) |>
-  # facultative part
-  mutate(across(
-    -c(X, Y, RAW.TIC.OR.ROI.sum.peak),
-    ~ . / RAW.TIC.OR.ROI.sum.peak # TIC normalisation !depending on the dataset!
-  )) |>
-  # end
+  # - facultative part -
+  # mutate(across(
+  #   -c(X, Y, RAW.TIC.OR.ROI.sum.peak),
+  #   ~ . / RAW.TIC.OR.ROI.sum.peak # TIC normalisation !depending on the dataset!
+  # )) |>
+  # # - end -
   select(-RAW.TIC.OR.ROI.sum.peak)
 
 # Coordinates and numeric matrix
@@ -109,72 +112,72 @@ simulation_fn <- list(
 # Methods -----------------------------------------------------------------
 
 imputation_methods <- list(
-  # zero = list(
+  # Zero = list(
   #   fun = impute_zero,
   #   transform = "none",
   #   scaling = "none"
   # ),
-  # mean = list(
+  # Mean = list(
   #   fun = impute_mean,
   #   transform = "none",
   #   scaling = "none"
   # ),
-  median = list(
+  Median = list(
     fun = impute_median,
     transform = "none",
     scaling = "none"
   ),
-  half_min = list(
+  HM = list(
     fun = impute_half_min,
     transform = "none",
     scaling = "none"
   )# ,
-  # missForest = list(
+  # RF = list(
   #   fun = impute_missForest,
   #   transform = "log1p",
   #   scaling = "none"
   # ),
-  # knn = list(
+  # KNN = list(
   #   fun = impute_knn,
   #   transform = "log1p",
   #   scaling = "pareto"
   # ),
-  # qrilc = list(
+  # QRILC = list(
   #   fun = impute_qrilc,
   #   transform = "log1p",
   #   scaling = "none"
   # ),
-  # ppca = list(
+  # PPCA = list(
   #   fun = impute_ppca,
   #   transform = "log1p",
   #   scaling = "pareto"
   # ),
-  # bpca = list(
+  # BPCA = list(
   #   fun = impute_bpca,
   #   transform = "log1p",
   #   scaling = "pareto"
   # ),
-  # svd = list(
+  # SVD = list(
   #   fun = impute_svd,
   #   transform = "log1p",
   #   scaling = "pareto"
   # ),
-  # nngp = list(
+  # NNGP = list(
   #   fun = impute_nngp,
   #   transform = "none",
   #   scaling = "none"
   # ),
-  # sp_knn = list(
+  # spKNN = list(
   #   fun = impute_spatial_knn,
   #   transform = "log1p",
   #   scaling = "none"
   # ),
-  # gp = list(
+  # GP = list(
   #   fun = impute_gp,
   #   transform = "log1p",
   #   scaling = "none"
   # ),
-  # idw = list(
+  # IDW = list(
   #   fun = impute_idw,
   #   transform = "log1p",
   #   scaling = "none"
@@ -316,17 +319,15 @@ saveRDS(
 
 list.files(path = "results", pattern = "\\.rds")
 
-exp <- readRDS("results/benchmark_MvaExport_10-04-2026_10.23.29.798_TIC_mcar_2026-05-27_20reps.rds")
-exp <- readRDS("results/benchmark_MvaExport_10-04-2026_10.23.29.798_TIC_mnar_2026-05-27_20reps.rds")
-exp <- readRDS("results/benchmark_MvaExport_10-04-2026_10.23.29.798_TIC_hybrid_2026-05-27_20reps.rds")
-exp <- readRDS("results/benchmark_MvaExport_10-04-2026_10.23.29.798_TIC_msi_2026-05-27_20reps.rds")
+exp <- readRDS("results/benchmark_MvaExport_10-04-2026_10.23.29.798_TIC_mcar_2026-06-17_50reps.rds")
+exp <- readRDS("results/benchmark_MvaExport_10-04-2026_10.23.29.798_TIC_mnar_2026-06-17_50reps.rds")
+exp <- readRDS("results/benchmark_MvaExport_10-04-2026_10.23.29.798_TIC_hybrid_2026-06-17_50reps.rds")
+exp <- readRDS("results/benchmark_MvaExport_10-04-2026_10.23.29.798_TIC_msi_2026-06-17_50reps.rds")
 
-exp <- readRDS("results/benchmark_ROI_Luca1303_mcar_2026-06-01_20reps.rds")
-exp <- readRDS("results/benchmark_ROI_Luca1303_mnar_2026-06-01_20reps.rds")
-exp <- readRDS("results/benchmark_ROI_Luca1303_hybrid_2026-06-01_20reps.rds")
-exp <- readRDS("results/benchmark_ROI_Luca1303_msi_2026-06-01_20reps.rds")
-
-exp <- readRDS("results/benchmark_ROI_Luca1303_msi_2026-04-23_5reps.rds")
+exp <- readRDS("results/benchmark_ROI_Luca1303_mcar_2026-06-16_50reps.rds")
+exp <- readRDS("results/benchmark_ROI_Luca1303_mnar_2026-06-16_50reps.rds")
+exp <- readRDS("results/benchmark_ROI_Luca1303_hybrid_2026-06-16_50reps.rds")
+exp <- readRDS("results/benchmark_ROI_Luca1303_msi_2026-06-16_50reps.rds")
 
 all_results     <- exp$all_results
 results_storage <- exp$results_storage
@@ -341,6 +342,7 @@ source("scripts/R/07_visualisation.R")
 # Aggregated metric plots (mean ± ribbon across replicates)
 plot_metric(all_results, "NRMSE")
 plot_metric(all_results, "MAE")
+plot_metric(all_results, "SAM")
 plot_metric(exp$all_results, "CCC", type='bar')
 plot_metric(exp$all_results, "SSIM", type='line')
 plot_metric(exp$all_results, "MoranDiff",  y_label = "Mean Abs. Diff. in Moran's I")
@@ -351,8 +353,8 @@ plot_runtime_vs_nrmse(exp$all_results)
 plot_spatial_fidelity(exp$all_results)
 plot_spectral_preservation(exp$all_results)
 
-visualise_heatmaps(feature_idx = 100, mode = "all_methods", target_prop = 0.3,     ncol = 4, rep_idx = 6)
-visualise_heatmaps(feature_idx = 9,  mode = "all_props",   target_method = "BPCA", ncol = 3, rep_idx = 10)
+visualise_heatmaps(feature_idx = 100, mode = "all_methods", target_prop = 0.1,     ncol = 4, rep_idx = 1)
+visualise_heatmaps(feature_idx = 9,  mode = "all_props",   target_method = "PPCA", ncol = 3, rep_idx = 1)
 
 
 # Downstream analyses -------------------------------------------------------
@@ -387,25 +389,60 @@ downstream_results <- compute_downstream_comparison(
 
 downstream_results$metrics  # inspect tidy table
 
-# -- Save -------------------------------------------------------------------
+# # -- Save -------------------------------------------------------------------
+# dir.create("results/downstream", showWarnings = FALSE)
+# 
+# # downstream_results <- downstream_results
+# saveRDS(
+#   downstream_results,
+#   file = file.path(
+#     "results/downstream",
+#     paste0(
+#       "downstream_", basename(DATA), "_", RUN_ID,
+#       "_", length(SEEDS), "reps.rds"
+#     )
+#   )
+# )
+# 
+# # -- Load a previous experiment ---------------------------------------------
+# list.files(path = "results/downstream", pattern = "\\.rds")
+# 
+# downstream_results <- readRDS("results/downstream/benchmark_ROI_Luca1303_mnar_2026-06-16_50reps_downstream.rds")
+# downstream_results <- readRDS("results/downstream/benchmark_ROI_Luca1303_hybrid_2026-06-16_50reps_downstream.rds")
+
+# -- Save Downstream Results --------------------------------------------------
 dir.create("results/downstream", showWarnings = FALSE)
 
-# downstream_results <- downstream_results
+downstream_output <- list(
+  metrics = downstream_results,
+  gt      = gt_downstream
+)
+
 saveRDS(
-  downstream_results,
+  downstream_output,
   file = file.path(
     "results/downstream",
-    paste0(
-      "downstream_", basename(DATA), "_", RUN_ID,
-      "_", length(SEEDS), "reps.rds"
-    )
+    paste0("downstream_", basename(DATA), "_", RUN_ID, "_", length(SEEDS), "reps.rds")
   )
 )
 
-# -- Load a previous experiment ---------------------------------------------
+# -- Load a previous experiment (Compatible with both local and cluster runs) -
 list.files(path = "results/downstream", pattern = "\\.rds")
 
-downstream_results <- readRDS("results/downstream/downstream_MvaExport_10-04-2026_10.23.29.798_TIC_msi_2026-05-27_1reps.rds")
+# Reading standardized uniform archive container
+downstream_data <- readRDS("results/downstream/benchmark_MvaExport_10-04-2026_10.23.29.798_TIC_mcar_2026-06-17_50reps_downstream.rds")
+downstream_data <- readRDS("results/downstream/benchmark_MvaExport_10-04-2026_10.23.29.798_TIC_mnar_2026-06-17_50reps_downstream.rds")
+downstream_data <- readRDS("results/downstream/benchmark_MvaExport_10-04-2026_10.23.29.798_TIC_hybrid_2026-06-17_50reps_downstream.rds")
+downstream_data <- readRDS("results/downstream/benchmark_MvaExport_10-04-2026_10.23.29.798_TIC_msi_2026-06-17_50reps_downstream.rds")
+
+downstream_data <- readRDS("results/downstream/benchmark_ROI_Luca1303_mcar_2026-06-16_50reps_downstream.rds")
+downstream_data <- readRDS("results/downstream/benchmark_ROI_Luca1303_mnar_2026-06-16_50reps_downstream.rds")
+downstream_data <- readRDS("results/downstream/benchmark_ROI_Luca1303_hybrid_2026-06-16_50reps_downstream.rds")
+downstream_data <- readRDS("results/downstream/benchmark_ROI_Luca1303_msi_2026-06-16_50reps_downstream.rds")
+
+# Expose both environments directly to local visualization scripts seamlessly
+downstream_results <- downstream_data$metrics
+gt_downstream      <- downstream_data$gt
 
 # -- Plots ------------------------------------------------------------------
 
