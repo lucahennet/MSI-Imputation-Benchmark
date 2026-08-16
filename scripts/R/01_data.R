@@ -19,19 +19,23 @@
 #' @return A tibble with columns ROI, X, Y — or NULL if file is skipped
 read_roi_txt <- function(file_path) {
   lines <- readLines(file_path)
-  
+
   scans <- str_extract(lines[grep("\\*NO Of SCANS:", lines)], "\\d+") |> as.numeric()
-  if (is.na(scans) || scans != 1) return(NULL)
-  
+  if (is.na(scans) || scans != 1) {
+    return(NULL)
+  }
+
   roi_id <- str_extract(lines[grep("\\*NAME:", lines)], "ROI\\s*\\d+") |>
     str_extract("\\d+") |>
     as.numeric()
-  
+
   coord_line <- lines[grep("\\*REGION SHAPE:", lines)]
   coords <- str_match_all(coord_line, "X=(\\d+), Y=(\\d+)")[[1]]
-  
-  if (nrow(coords) == 0) return(NULL)
-  
+
+  if (nrow(coords) == 0) {
+    return(NULL)
+  }
+
   tibble(
     ROI = roi_id,
     X   = as.numeric(coords[, 2]),
@@ -46,8 +50,10 @@ read_roi_txt <- function(file_path) {
 #' @return A tibble with sample, X, Y, ROI and all feature columns
 process_csv_folder <- function(folder_path, coords_df) {
   csv_file <- list.files(folder_path, "\\.csv$", full.names = TRUE)[1]
-  if (is.na(csv_file)) return(NULL)
-  
+  if (is.na(csv_file)) {
+    return(NULL)
+  }
+
   read.csv(csv_file) |>
     mutate(ROI = as.numeric(str_extract(ROI, "\\d+$"))) |>
     inner_join(coords_df, by = "ROI") |>
@@ -63,14 +69,14 @@ process_csv_folder <- function(folder_path, coords_df) {
 #' @return A wide tibble: sample, X, Y, ROI, TIC, then feature columns
 assemble_msi_data <- function(root_path) {
   folders <- list.dirs(root_path, recursive = FALSE)
-  
-  txt_folder <- folders[map_lgl(folders, ~any(str_detect(list.files(.x), "\\.txt$")))]
-  txt_files  <- list.files(txt_folder, "\\.txt$", full.names = TRUE)
+
+  txt_folder <- folders[map_lgl(folders, ~ any(str_detect(list.files(.x), "\\.txt$")))]
+  txt_files <- list.files(txt_folder, "\\.txt$", full.names = TRUE)
   coords_ref <- map_dfr(txt_files, read_roi_txt)
-  
-  csv_folders <- folders[map_lgl(folders, ~any(str_detect(list.files(.x), "\\.csv$")))]
-  raw_joined  <- map_dfr(csv_folders, process_csv_folder, coords_df = coords_ref)
-  
+
+  csv_folders <- folders[map_lgl(folders, ~ any(str_detect(list.files(.x), "\\.csv$")))]
+  raw_joined <- map_dfr(csv_folders, process_csv_folder, coords_df = coords_ref)
+
   raw_joined |>
     select(sample, X, Y, ROI, RAW.TIC.OR.ROI.sum.peak, everything())
 }
@@ -109,29 +115,29 @@ normalize_msi_data <- function(data_long) {
 #' @param feature_range Integer vector of column indices corresponding to features
 #' @return A tibble summarising dataset dimensions, NA/zero counts and percentages
 dataset_summary <- function(raw_wide, feature_range) {
-  n_pixels   <- nrow(raw_wide)
+  n_pixels <- nrow(raw_wide)
   n_features <- length(feature_range) # eventually remove the first one that do not count
 
   raw_subset <- raw_wide[, feature_range]
-  
-  total_cells   <- n_pixels * n_features
-  na_count      <- sum(is.na(raw_subset))
-  na_perc       <- (na_count / total_cells) * 100
-  
-  cols_with_na    <- colSums(is.na(raw_subset)) > 0
+
+  total_cells <- n_pixels * n_features
+  na_count <- sum(is.na(raw_subset))
+  na_perc <- (na_count / total_cells) * 100
+
+  cols_with_na <- colSums(is.na(raw_subset)) > 0
   num_cols_with_na <- sum(cols_with_na)
   perc_cols_with_na <- (num_cols_with_na / n_features) * 100
-  
+
   zero_count <- sum(raw_subset == 0, na.rm = TRUE)
-  zero_perc  <- (zero_count / total_cells) * 100
+  zero_perc <- (zero_count / total_cells) * 100
 
   cols_with_zero <- colSums(raw_subset == 0, na.rm = TRUE) > 0
   num_cols_with_zero <- sum(cols_with_zero)
   perc_cols_with_zero <- (num_cols_with_zero / n_features) * 100
-  
+
   rows_with_zero <- sum(apply(raw_subset, 1, function(row) any(row == 0, na.rm = TRUE)))
   perc_rows_with_zero <- (rows_with_zero / n_pixels) * 100
-  
+
   tibble(
     Metric = c(
       "Total Pixels", "Total Features",

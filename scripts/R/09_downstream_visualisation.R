@@ -4,7 +4,7 @@
 # Inputs:   downstream_results (from compute_downstream_comparison()),
 #           gt_downstream      (from run_all_downstream() on ground truth),
 #           meta               (ROI metadata)
-# Depends:  ggplot2, patchwork, RColorBrewer
+# Depends:  ggplot2, patchwork, RColorBrewer, ggridges, pls
 # =============================================================================
 
 
@@ -65,7 +65,8 @@ plot_pca_overlay <- function(downstream_results,
                              rep_idx = 1,
                              pc_x = "PC1",
                              pc_y = "PC2",
-                             colour_by = "Group") {
+                             colour_by = "Group",
+                             meta = NULL) {
   rep_key <- paste0("r", rep_idx)
   p_str <- as.character(target_prop)
   pca_list <- downstream_results$pca_store[[rep_key]][[p_str]]
@@ -74,8 +75,16 @@ plot_pca_overlay <- function(downstream_results,
     stop("No PCA results for rep=", rep_idx, ", prop=", target_prop)
   }
 
-  # Resolve colour column, falling back gracefully for spatial-only data
+  # Resolve colour column.
+  # Priority: (1) already in PCA scores, (2) supplied via meta, (3) fallbacks.
   gt_scores <- gt_downstream$pca$scores
+  if (!colour_by %in% colnames(gt_scores) && !is.null(meta) && colour_by %in% colnames(meta)) {
+    gt_scores[[colour_by]] <- meta[[colour_by]]
+    pca_list <- lapply(pca_list, function(p) {
+      p$scores[[colour_by]] <- meta[[colour_by]]
+      p
+    })
+  }
   if (!colour_by %in% colnames(gt_scores)) {
     if (!is.null(gt_downstream$clustering$labels)) {
       cluster_col <- factor(paste0("Cluster_", gt_downstream$clustering$labels))
@@ -267,8 +276,230 @@ plot_network_metrics <- function(downstream_results) {
     )
 }
 
+#' Whole-dataset intensity distribution overlay: all features, all replicates.
+#'
+#' Pools every (ROI × feature) log1p-intensity value across *all* replicates
+#' for a given missingness proportion into a single distribution per method,
+#' then plots them as overlapping density curves (one curve = one method,
+#' faceted by missingness proportion).  The ground-truth distribution is drawn
+#' as a black reference line so deviations are immediately visible.
+#'
+#' Averaging across replicates is done implicitly by pooling: values from
+#' rep 1, rep 2, … are concatenated into one vector per method × prop before
+#' density estimation.  This is appropriate here because we are characterising
+#' the marginal intensity distribution — a shape property — not a per-replicate
+#' metric.  Individual replicates are not shown separately because the
+#' replicate-to-replicate variation of the global distribution is negligible
+#' compared to method-to-method differences.
+#'
+#' @param results_storage  The *original* results_storage object produced by
+#'   the imputation loop: structure [[rep_key]][[p_str]]$imputed[[method]].
+#'   Do NOT pass downstream_results here.
+#' @param mat_true   Fully-observed ground-truth matrix (ROIs × features).
+#' @param props      Missingness proportions to display.  NULL = all available.
+plot_distribution_overlay <- function(results_storage, mat_true, props = NULL) {
+  if (!requireNamespace("ggridges", quietly = TRUE)) {
+    stop("Package 'ggridges' is required: install.packages('ggridges')")
+  }
 
-# ── 5. Summary: all downstream metrics in one view ────────────────────────────
+  rep_keys <- names(results_storage)
+  if (length(rep_keys) == 0) stop("results_storage is empty.")
+
+  # Determine proportions to show
+  all_props <- names(results_storage[[rep_keys[1]]])
+  props <- if (is.null(props)) all_props else intersect(as.character(props), all_props)
+  if (length(props) == 0) stop("None of the requested props found in results_storage.")
+
+  # Ground-truth vector (log1p of every value) — same reference for all props
+  gt_vals <- log1p(as.vector(mat_true))
+  gt_vals <- gt_vals[is.finite(gt_vals)]
+
+  rows <- list()
+
+  for (p_str in props) {
+    # Collect method names from the first replicate that has data
+    method_names <- NULL
+    for (rk in rep_keys) {
+      imp <- results_storage[[rk]][[p_str]]$imputed
+      if (!is.null(imp) && length(imp) > 0) {
+        method_names <- names(imp)
+        break
+      }
+    }
+    if (is.null(method_names)) next
+
+    # Pool values across all replicates for each method
+    for (m in method_names) {
+      pooled <- unlist(lapply(rep_keys, function(rk) {
+        mat <- results_storage[[rk]][[p_str]]$imputed[[m]]
+        if (is.null(mat)) {
+          return(NULL)
+        }
+        v <- log1p(as.vector(mat))
+        v[is.finite(v)]
+      }), use.names = FALSE)
+
+      if (length(pooled) == 0) next
+      rows[[length(rows) + 1L]] <- tibble(
+        prop   = as.numeric(p_str),
+        method = m,
+        value  = pooled
+      )
+    }
+
+    # Ground truth row (repeated per prop so it appears in every facet)
+    rows[[length(rows) + 1L]] <- tibble(
+      prop   = as.numeric(p_str),
+      method = "Ground Truth",
+      value  = gt_vals
+    )
+  }
+
+  if (length(rows) == 0) stop("No data collected — check results_storage structure.")
+  combined <- bind_rows(rows)
+
+  # Ensure Ground Truth is always the topmost ridge
+  method_order <- c("Ground Truth", sort(setdiff(unique(combined$method), "Ground Truth")))
+  combined$method <- factor(combined$method, levels = rev(method_order))
+
+  n_methods <- length(method_order) - 1L # exclude GT
+  custom_palette <- c("Ground Truth" = "#111111", .method_colours(method_order[-1]))
+
+  n_reps <- length(rep_keys)
+  n_feat <- ncol(mat_true)
+  subtitle_txt <- paste0(
+    "All ", n_feat, " features × ", n_reps,
+    if (n_reps == 1) " replicate" else " replicates (pooled)",
+    " — log\u2081p(intensity)"
+  )
+
+  ggplot(combined, aes(x = value, y = method, fill = method, colour = method)) +
+    ggridges::geom_density_ridges(
+      alpha          = 0.45,
+      scale          = 1.15,
+      linewidth      = 0.6,
+      rel_min_height = 0.005
+    ) +
+    facet_wrap(~prop, labeller = as_labeller(.prop_label)) +
+    scale_fill_manual(values = custom_palette) +
+    scale_colour_manual(values = custom_palette) +
+    .base_theme() +
+    theme(legend.position = "none") +
+    labs(
+      title    = "Global intensity distribution: imputed vs ground truth",
+      subtitle = subtitle_txt,
+      x        = "log\u2081p(Intensity)",
+      y        = NULL
+    )
+}
+
+
+# ── 5. PLS-DA overlay ─────────────────────────────────────────────────────────
+
+#' Faceted PLS-DA score plots — imputed (colour) over ground truth (grey).
+#'
+#' Mirrors plot_pca_overlay in structure.  Scores are extracted from the
+#' plsr models stored in downstream_results$pls_store.  The ground-truth
+#' model comes from gt_downstream$plsda_gt$result.
+#'
+#' @param downstream_results Output of compute_downstream_comparison().
+#' @param gt_downstream      Output of run_all_downstream().
+#' @param target_prop        Missingness proportion to display (e.g. 0.4).
+#' @param rep_idx            Replicate index (default 1).
+#' @param colour_by          Column in the scores data frame used for colour.
+#'                           Must have been joined into the PCA scores (i.e. a
+#'                           meta column); falls back to "Group" or "ROI".
+plot_plsda_overlay <- function(downstream_results,
+                               gt_downstream,
+                               target_prop = 0.4,
+                               rep_idx = 1,
+                               colour_by = "Group",
+                               meta = NULL) {
+  rep_key <- paste0("r", rep_idx)
+  p_str <- as.character(target_prop)
+  pls_list <- downstream_results$pls_store[[rep_key]][[p_str]]
+
+  if (is.null(pls_list) || length(pls_list) == 0) {
+    stop(
+      "No PLS-DA results for rep=", rep_idx, ", prop=", target_prop,
+      ". Check that the plsda module ran and that meta has the contrast column."
+    )
+  }
+
+  # Ground-truth scores: extract from the GT plsr model (still a full model in gt_downstream)
+  gt_mod <- gt_downstream$plsda_gt$result
+  if (is.null(gt_mod)) {
+    stop("Ground-truth PLS-DA model is NULL. Re-run run_all_downstream() with a valid contrast column.")
+  }
+  .pls_scores_2d <- function(mod) {
+    s <- pls::scores(mod)
+    if (length(dim(s)) == 3L) {
+      s <- s[, seq_len(min(2L, dim(s)[2L])), 1L, drop = FALSE]
+    } else {
+      s <- s[, seq_len(min(2L, ncol(s))), drop = FALSE]
+    }
+    df <- as.data.frame(s)
+    colnames(df) <- paste0("LV", seq_len(ncol(df)))
+    df
+  }
+  gt_scores <- .pls_scores_2d(gt_mod)
+
+  # Resolve colour column: check gt PCA scores first (meta was joined there),
+  # then fall back to the explicit meta argument, then to a plain ROI index.
+  gt_pca_scores <- gt_downstream$pca$scores
+  if (colour_by %in% colnames(gt_pca_scores)) {
+    gt_scores[[colour_by]] <- gt_pca_scores[[colour_by]]
+  } else if (!is.null(meta) && colour_by %in% colnames(meta)) {
+    gt_scores[[colour_by]] <- meta[[colour_by]]
+  } else {
+    colour_by <- "ROI"
+    gt_scores$ROI <- seq_len(nrow(gt_scores))
+  }
+
+  # pls_store now holds pre-extracted score data frames (LV1, LV2), not plsr models
+  method_scores <- map_dfr(names(pls_list), function(m) {
+    sc <- pls_list[[m]]
+    if (is.null(sc) || !is.data.frame(sc)) {
+      return(tibble())
+    }
+    sc[[colour_by]] <- gt_scores[[colour_by]]
+    sc$method <- m
+    sc
+  })
+
+  if (nrow(method_scores) == 0) {
+    message("All PLS-DA score matrices are NULL for this prop/rep — nothing to plot.")
+    return(invisible(NULL))
+  }
+
+  gt_xy <- gt_scores |> rename(GT_x = LV1, GT_y = LV2)
+
+  ggplot(method_scores, aes(LV1, LV2, colour = .data[[colour_by]])) +
+    geom_point(
+      data = gt_xy,
+      aes(x = GT_x, y = GT_y),
+      colour = "grey80",
+      size = 1.8,
+      inherit.aes = FALSE
+    ) +
+    geom_point(size = 2, alpha = 0.8) +
+    facet_wrap(~method) +
+    scale_colour_viridis_d(option = "D") +
+    .base_theme() +
+    labs(
+      title = paste0(
+        "PLS-DA score overlay  |  ", .prop_label(target_prop),
+        "  |  rep ", rep_idx
+      ),
+      subtitle = "Grey = ground truth; coloured = imputed",
+      x = "LV1",
+      y = "LV2",
+      colour = colour_by
+    )
+}
+
+
+# ── 6. Summary: all downstream metrics in one view ────────────────────────────
 
 #' Faceted bar chart showing all downstream scalar metrics for a single
 #' missingness proportion. Useful as a single-page overview figure.
@@ -290,7 +521,7 @@ plot_downstream_summary <- function(downstream_results,
                                       "EdgeJaccard"
                                     )) {
   candidate_metrics <- c(
-    "ProcrustesSS",
+    "ProcrustesSS", "PLS_ProcrustesSS", "MeanKSDistance",
     "FeatureVarCor", "NMF_SpatialCor",
     "ARI", "ARI_Group", "Silhouette",
     "TTest_Jaccard", "TTest_RankCor",

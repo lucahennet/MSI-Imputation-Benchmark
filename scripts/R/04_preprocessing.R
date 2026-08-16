@@ -4,7 +4,7 @@
 #           along with their inverses for post-imputation reversal.
 # Inputs:   - A numeric matrix (pixels × features) and a method specification list
 # Outputs:  - A list containing the pre-processed matrix, the forward and backward functions
-# Depends:  
+# Depends: 
 # =============================================================================
 
 
@@ -35,40 +35,43 @@ scalers <- list(
     forward = function(x) list(data = x, params = NULL),
     backward = function(x, params) x
   ),
-  
   zscore = list(
-    forward = function(x){
+    forward = function(x) {
       mu <- colMeans(x, na.rm = TRUE)
       sd <- apply(x, 2, sd, na.rm = TRUE)
       sd[sd == 0 | is.na(sd)] <- 1
-      list(data = sweep(sweep(x, 2, mu, "-"), 2, sd, "/"), 
-           params = list(mu = mu, measure = sd))
+      list(
+        data = sweep(sweep(x, 2, mu, "-"), 2, sd, "/"),
+        params = list(mu = mu, measure = sd)
+      )
     },
     backward = function(x, params) sweep(sweep(x, 2, params$measure, "*"), 2, params$mu, "+")
   ),
-  
   pareto = list(
     # Pareto uses the square root of the SD as the scaling factor
-    forward = function(x){
+    forward = function(x) {
       mu <- colMeans(x, na.rm = TRUE)
       sd <- apply(x, 2, sd, na.rm = TRUE)
       sq_sd <- sqrt(sd)
       sq_sd[sq_sd == 0 | is.na(sq_sd)] <- 1
-      list(data = sweep(sweep(x, 2, mu, "-"), 2, sq_sd, "/"), 
-           params = list(mu = mu, measure = sq_sd))
+      list(
+        data = sweep(sweep(x, 2, mu, "-"), 2, sq_sd, "/"),
+        params = list(mu = mu, measure = sq_sd)
+      )
     },
     backward = function(x, params) sweep(sweep(x, 2, params$measure, "*"), 2, params$mu, "+")
   ),
-  
   range = list(
     # Scales everything between 0 and 1
-    forward = function(x){
+    forward = function(x) {
       min_val <- apply(x, 2, min, na.rm = TRUE)
       max_val <- apply(x, 2, max, na.rm = TRUE)
       diff_val <- max_val - min_val
       diff_val[diff_val == 0 | is.na(diff_val)] <- 1
-      list(data = sweep(sweep(x, 2, min_val, "-"), 2, diff_val, "/"), 
-           params = list(min = min_val, measure = diff_val))
+      list(
+        data = sweep(sweep(x, 2, min_val, "-"), 2, diff_val, "/"),
+        params = list(min = min_val, measure = diff_val)
+      )
     },
     backward = function(x, params) sweep(sweep(x, 2, params$measure, "*"), 2, params$min, "+")
   )
@@ -85,18 +88,17 @@ scalers <- list(
 #'        - transform: The transformation functions (forward and backward)
 #'        - scaler: The scaling functions (forward and backward)
 #'        - scale_params: The parameters needed to reverse the scaling after imputation
-apply_preprocessing <- function(mat, method_spec){
-  
+apply_preprocessing <- function(mat, method_spec) {
   # Transform
   tr <- transformers[[method_spec$transform]]
-  
+
   mat_t <- tr$forward(mat)
-  
+
   # Scale
   sc <- scalers[[method_spec$scaling]]
-  
+
   scaled <- sc$forward(mat_t)
-  
+
   list(
     data = scaled$data,
     transform = tr,
@@ -111,16 +113,15 @@ apply_preprocessing <- function(mat, method_spec){
 #' @param mat_imp  Numeric matrix (pixels × features) with imputed values, still in pre-processed space
 #' @param prep     The list returned by apply_preprocessing() containing the transform and scaler
 #' @return The imputed matrix transformed back to the original data space, ready for metric computation
-reverse_preprocessing <- function(mat_imp, prep){
-  
+reverse_preprocessing <- function(mat_imp, prep) {
   # Undo scaling
   mat_imp <- prep$scaler$backward(
     mat_imp,
     prep$scale_params
   )
-  
+
   # Undo transform
   mat_imp <- prep$transform$backward(mat_imp)
-  
+
   mat_imp
 }

@@ -56,9 +56,6 @@ missing_model <- "msi"  # one of: "mcar", "mnar", "hybrid", "msi", "mcar_g"
 DATA = "data/MvaExport_10-04-2026_10.23.29.798_TIC"
 DATA = "data/ROI_Luca1303"
 
-# DATA = "data/MvaExport_30-06-2026_11.36.12.551_fib"
-# DATA = "data/MvaExport_30-06-2026_12.04.46.174_norm"
-
 # Unique identifier for this pipeline run: <missing_model>_<date>, e.g. "msi_2026-04-22"
 RUN_ID <- paste0(missing_model, "_", Sys.Date())
 
@@ -66,8 +63,7 @@ RUN_ID <- paste0(missing_model, "_", Sys.Date())
 raw_wide <- assemble_msi_data(DATA) |>
   distinct(X, Y, .keep_all = TRUE)  # remove duplicate pixels
 
-FEATURE_RANGE <- 8:ncol(raw_wide)  # which features to load (min = 8, max = 1007)
-# FEATURE_RANGE <- 8:10
+FEATURE_RANGE <- 8:ncol(raw_wide)  # which features to load (min = 8, max = NA)
 
 dataset_summary(raw_wide, FEATURE_RANGE)
 
@@ -87,12 +83,6 @@ df_impute <- raw_wide |>
     X, Y, RAW.TIC.OR.ROI.sum.peak,
     where(~ !any(is.na(.)) && !any(. == 0)) # drop all-NA or all-zero features
   ) |>
-  # - facultative part -
-  # mutate(across(
-  #   -c(X, Y, RAW.TIC.OR.ROI.sum.peak),
-  #   ~ . / RAW.TIC.OR.ROI.sum.peak # TIC normalisation !depending on the dataset!
-  # )) |>
-  # # - end -
   select(-RAW.TIC.OR.ROI.sum.peak)
 
 # Coordinates and numeric matrix
@@ -131,32 +121,32 @@ imputation_methods <- list(
     fun = impute_half_min,
     transform = "none",
     scaling = "none"
-  )# ,
-  # RF = list(
-  #   fun = impute_missForest,
-  #   transform = "log1p",
-  #   scaling = "none"
-  # ),
-  # KNN = list(
-  #   fun = impute_knn,
-  #   transform = "log1p",
-  #   scaling = "pareto"
-  # ),
-  # QRILC = list(
-  #   fun = impute_qrilc,
-  #   transform = "log1p",
-  #   scaling = "none"
-  # ),
-  # PPCA = list(
-  #   fun = impute_ppca,
-  #   transform = "log1p",
-  #   scaling = "pareto"
-  # ),
-  # BPCA = list(
-  #   fun = impute_bpca,
-  #   transform = "log1p",
-  #   scaling = "pareto"
-  # ),
+  ),
+  RF = list(
+    fun = impute_missForest,
+    transform = "log1p",
+    scaling = "none"
+  ),
+  KNN = list(
+    fun = impute_knn,
+    transform = "log1p",
+    scaling = "pareto"
+  ),
+  QRILC = list(
+    fun = impute_qrilc,
+    transform = "log1p",
+    scaling = "none"
+  ),
+  PPCA = list(
+    fun = impute_ppca,
+    transform = "log1p",
+    scaling = "pareto"
+  ),
+  BPCA = list(
+    fun = impute_bpca,
+    transform = "log1p",
+    scaling = "pareto"
+  ),
   # SVD = list(
   #   fun = impute_svd,
   #   transform = "log1p",
@@ -167,21 +157,21 @@ imputation_methods <- list(
   #   transform = "none",
   #   scaling = "none"
   # ),
-  # spKNN = list(
-  #   fun = impute_spatial_knn,
-  #   transform = "log1p",
-  #   scaling = "none"
-  # ),
-  # GP = list(
-  #   fun = impute_gp,
-  #   transform = "log1p",
-  #   scaling = "none"
-  # ),
-  # IDW = list(
-  #   fun = impute_idw,
-  #   transform = "log1p",
-  #   scaling = "none"
-  # )
+  spKNN = list(
+    fun = impute_spatial_knn,
+    transform = "log1p",
+    scaling = "none"
+  ),
+  GP = list(
+    fun = impute_gp,
+    transform = "log1p",
+    scaling = "none"
+  ),
+  IDW = list(
+    fun = impute_idw,
+    transform = "log1p",
+    scaling = "none"
+  )
 )
 
 external_methods <- list(
@@ -324,10 +314,10 @@ exp <- readRDS("results/benchmark_MvaExport_10-04-2026_10.23.29.798_TIC_mnar_202
 exp <- readRDS("results/benchmark_MvaExport_10-04-2026_10.23.29.798_TIC_hybrid_2026-06-17_50reps.rds")
 exp <- readRDS("results/benchmark_MvaExport_10-04-2026_10.23.29.798_TIC_msi_2026-06-17_50reps.rds")
 
-exp <- readRDS("results/benchmark_ROI_Luca1303_mcar_2026-06-16_50reps.rds")
-exp <- readRDS("results/benchmark_ROI_Luca1303_mnar_2026-06-16_50reps.rds")
-exp <- readRDS("results/benchmark_ROI_Luca1303_hybrid_2026-06-16_50reps.rds")
-exp <- readRDS("results/benchmark_ROI_Luca1303_msi_2026-06-16_50reps.rds")
+exp <- readRDS("results/benchmark_ROI_Luca1303_mcar_2026-07-30_50reps.rds")
+exp <- readRDS("results/benchmark_ROI_Luca1303_mnar_2026-07-30_50reps.rds")
+exp <- readRDS("results/benchmark_ROI_Luca1303_hybrid_2026-07-30_50reps.rds")
+exp <- readRDS("results/benchmark_ROI_Luca1303_msi_2026-07-31_50reps.rds")
 
 all_results     <- exp$all_results
 results_storage <- exp$results_storage
@@ -341,9 +331,10 @@ source("scripts/R/07_visualisation.R")
 
 # Aggregated metric plots (mean ± ribbon across replicates)
 plot_metric(all_results, "NRMSE")
-plot_metric(all_results, "MAE")
+# plot_metric(all_results, "RMSE")
+# plot_metric(all_results, "MAE")
 plot_metric(all_results, "SAM")
-plot_metric(exp$all_results, "CCC", type='bar')
+# plot_metric(exp$all_results, "CCC", type='line')
 plot_metric(exp$all_results, "SSIM", type='line')
 plot_metric(exp$all_results, "MoranDiff",  y_label = "Mean Abs. Diff. in Moran's I")
 plot_metric(all_results, "VarRatio",   y_label = "Mean Variance Ratio")
@@ -357,15 +348,91 @@ visualise_heatmaps(feature_idx = 100, mode = "all_methods", target_prop = 0.1,  
 visualise_heatmaps(feature_idx = 9,  mode = "all_props",   target_method = "PPCA", ncol = 3, rep_idx = 1)
 
 
+# Plots manuscript --------------------------------------------------------
+
+# source("scripts/R/07.2_plots_manuscript.R")
+# 
+# # Load datasets/experiments
+# zebrafish <- readRDS("results/benchmark_ROI_Luca1303_mcar_2026-07-30_50reps.rds")
+# mouse <- readRDS("results/benchmark_MvaExport_10-04-2026_10.23.29.798_TIC_mcar_2026-06-17_50reps.rds")
+# 
+# zebrafish <- readRDS("results/benchmark_ROI_Luca1303_mnar_2026-07-30_50reps.rds")
+# mouse <- readRDS("results/benchmark_MvaExport_10-04-2026_10.23.29.798_TIC_mnar_2026-06-17_50reps.rds")
+# 
+# zebrafish <- readRDS("results/benchmark_ROI_Luca1303_hybrid_2026-07-30_50reps.rds")
+# mouse <- readRDS("results/benchmark_MvaExport_10-04-2026_10.23.29.798_TIC_hybrid_2026-06-17_50reps.rds")
+# 
+# zebrafish <- readRDS("results/benchmark_ROI_Luca1303_msi_2026-07-31_50reps.rds")
+# mouse <- readRDS("results/benchmark_MvaExport_10-04-2026_10.23.29.798_TIC_msi_2026-06-17_50reps.rds")
+# 
+# # Group them in a named list
+# datasets <- list(
+#   "Zebrafish Dataset" = zebrafish$all_results, 
+#   "Mouse Dataset" = mouse$all_results
+# )
+# 
+# if (zebrafish$config$missing_model != mouse$config$missing_model) {
+#   stop("Error: Missing models do not match between datasets.")
+# } else {
+#   mode <- str_to_upper(zebrafish$config$missing_model)
+# }
+# 
+# plot_metric_line(
+#   datasets, "NRMSE",
+#   y_label = "NRMSE",
+#   ylim = c(0, 0.6),
+#   export_prefix = paste0("figures/NRMSE_", mode)
+# )
+# 
+# plot_metric_line(
+#   datasets, "SAM",
+#   y_label = "SAM",
+#   ylim = c(0, 0.25),
+#   export_prefix = paste0("figures/SAM_", mode)
+# )
+# 
+# plot_spatial_fidelity(
+#   datasets,
+#   export_prefix = paste0("figures/spatial_", mode)
+# )
+# 
+# plot_spectral_preservation(
+#   datasets,
+#   export_prefix = paste0("figures/spectral_", mode)
+# )
+
+# load_tagged <- function(path, dataset, mechanism) {
+#   readRDS(path)$all_results |>
+#     mutate(dataset = dataset, mechanism = mechanism)
+# }
+# 
+# all_df <- bind_rows(
+#   load_tagged("results/benchmark_ROI_Luca1303_mcar_2026-07-30_50reps.rds",
+#               "Zebrafish", "MCAR"),
+#   load_tagged("results/benchmark_MvaExport_10-04-2026_10.23.29.798_TIC_mcar_2026-06-17_50reps.rds",
+#               "Mouse", "MCAR"),
+#   load_tagged("results/benchmark_ROI_Luca1303_mnar_2026-07-30_50reps.rds",
+#               "Zebrafish", "MNAR"),
+#   load_tagged("results/benchmark_MvaExport_10-04-2026_10.23.29.798_TIC_mnar_2026-06-17_50reps.rds",
+#               "Mouse", "MNAR"),
+#   load_tagged("results/benchmark_ROI_Luca1303_hybrid_2026-07-30_50reps.rds",
+#               "Zebrafish", "Hybrid"),
+#   load_tagged("results/benchmark_MvaExport_10-04-2026_10.23.29.798_TIC_hybrid_2026-06-17_50reps.rds",
+#               "Mouse", "Hybrid"),
+#   load_tagged("results/benchmark_ROI_Luca1303_msi_2026-07-31_50reps.rds",
+#               "Zebrafish", "MSI"),
+#   load_tagged("results/benchmark_MvaExport_10-04-2026_10.23.29.798_TIC_msi_2026-06-17_50reps.rds",
+#               "Mouse", "MSI")
+# )
+# 
+# plot_runtime_vs_nrmse(all_df, facet_by = "dataset")
+# plot_runtime_vs_nrmse(all_df, export_prefix = "figures/runtime_vs_nrmse_all")
+
+
 # Downstream analyses -------------------------------------------------------
 
 source("scripts/R/08_downstream.R")
 source("scripts/R/09_downstream_visualisation.R")
-
-# -- Config -----------------------------------------------------------------
-# The spatial pipeline has no group/region labels, so DE is skipped.
-# DS_CONTRAST <- NULL
-# DS_LEVELS   <- NULL
 
 # -- Ground truth -----------------------------------------------------------
 message("\n══ Ground truth downstream analyses ══════════════════════════")
@@ -388,27 +455,6 @@ downstream_results <- compute_downstream_comparison(
 )
 
 downstream_results$metrics  # inspect tidy table
-
-# # -- Save -------------------------------------------------------------------
-# dir.create("results/downstream", showWarnings = FALSE)
-# 
-# # downstream_results <- downstream_results
-# saveRDS(
-#   downstream_results,
-#   file = file.path(
-#     "results/downstream",
-#     paste0(
-#       "downstream_", basename(DATA), "_", RUN_ID,
-#       "_", length(SEEDS), "reps.rds"
-#     )
-#   )
-# )
-# 
-# # -- Load a previous experiment ---------------------------------------------
-# list.files(path = "results/downstream", pattern = "\\.rds")
-# 
-# downstream_results <- readRDS("results/downstream/benchmark_ROI_Luca1303_mnar_2026-06-16_50reps_downstream.rds")
-# downstream_results <- readRDS("results/downstream/benchmark_ROI_Luca1303_hybrid_2026-06-16_50reps_downstream.rds")
 
 # -- Save Downstream Results --------------------------------------------------
 dir.create("results/downstream", showWarnings = FALSE)
@@ -448,11 +494,8 @@ gt_downstream      <- downstream_data$gt
 
 # PCA
 plot_pca_overlay(downstream_results, gt_downstream, target_prop = 0.1, rep_idx = 1)
-plot_pca_overlay(downstream_results, gt_downstream, target_prop = 0.4, rep_idx = 1)
+plot_pca_overlay(downstream_results, gt_downstream, target_prop = 0.5, rep_idx = 1)
 plot_procrustes(downstream_results)
-
-# Differential
-plot_de_comparisons(downstream_results)
 
 # Clustering
 plot_clustering_metrics(downstream_results)
@@ -468,4 +511,33 @@ plot_downstream_summary(downstream_results, target_prop = 0.4)
 plot_metric(downstream_results$metrics, "ProcrustesSS",  y_label = "Procrustes SS (lower = better)")
 plot_metric(downstream_results$metrics, "EdgeJaccard",   y_label = "Edge Jaccard (higher = better)")
 plot_metric(downstream_results$metrics, "FeatureVarCor", y_label = "Per-feature Variance Correlation (Higher = Better)")
-# plot_metric(downstream_results$metrics, "NMF_SpatialCor", y_label = "NMF Spatial Map Preservation (Higher = Better)")
+
+
+# Plots manuscript --------------------------------------------------------
+
+# source("scripts/R/07.2_plots_manuscript.R")
+# 
+# zebrafish_downstream <- readRDS("results/downstream/benchmark_ROI_Luca1303_mcar_2026-06-16_50reps_downstream.rds")
+# mouse_downstream     <- readRDS("results/downstream/benchmark_MvaExport_10-04-2026_10.23.29.798_TIC_mcar_2026-06-17_50reps_downstream.rds")
+# 
+# zebrafish_downstream <- readRDS("results/downstream/benchmark_ROI_Luca1303_mnar_2026-06-16_50reps_downstream.rds")
+# mouse_downstream     <- readRDS("results/downstream/benchmark_MvaExport_10-04-2026_10.23.29.798_TIC_mnar_2026-06-17_50reps_downstream.rds")
+# 
+# zebrafish_downstream <- readRDS("results/downstream/benchmark_ROI_Luca1303_hybrid_2026-06-16_50reps_downstream.rds")
+# mouse_downstream     <- readRDS("results/downstream/benchmark_MvaExport_10-04-2026_10.23.29.798_TIC_hybrid_2026-06-17_50reps_downstream.rds")
+# 
+# zebrafish_downstream <- readRDS("results/downstream/benchmark_ROI_Luca1303_msi_2026-06-16_50reps_downstream.rds")
+# mouse_downstream     <- readRDS("results/downstream/benchmark_MvaExport_10-04-2026_10.23.29.798_TIC_msi_2026-06-17_50reps_downstream.rds")
+# 
+# # Group them exactly like `datasets` above, using the same names/order
+# downstream_datasets <- list(
+#   "Zebrafish Dataset" = zebrafish_downstream$metrics$metrics,
+#   "Mouse Dataset"     = mouse_downstream$metrics$metrics
+# )
+# 
+# plot_metric_line(
+#   downstream_datasets, "ProcrustesSS",
+#   y_label = expression(paste("SS", italic("")[proc], "")),
+#   ylim = c(0, 0.5),
+#   export_prefix = paste0("figures/ProcrustesSS_", "HYBRID")
+# )

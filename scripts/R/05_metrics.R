@@ -1,6 +1,6 @@
 # =============================================================================
 # 05_metrics.R
-# Purpose:  Implement a suite of evaluation metrics to assess imputation performance, 
+# Purpose:  Implement evaluation metrics to assess imputation performance, 
 #           including both value accuracy and spatial structure preservation.
 # Inputs:   - True complete matrix, imputed matrix, spatial coordinates, and mask of missing values
 # Outputs:  - A list of computed metric values for each imputation method
@@ -65,7 +65,7 @@ to_image <- function(values, coords) {
 #' @param true A numeric matrix of true values (pixels × features).
 #' @param pred A numeric matrix of predicted values (pixels × features).
 #' @param coords A data frame with columns X and Y indicating the pixel coordinates 
-#' for each #' row in the 'true' and 'pred' matrices. The number of rows in 'true' 
+#' for each row in the 'true' and 'pred' matrices. The number of rows in 'true' 
 #' and 'pred' should match the number of rows in 'coords'.
 #' @return A single numeric value representing the average SSIM across all features. 
 #' Higher values indicate greater similarity between the true and predicted images, 
@@ -267,12 +267,6 @@ metric_functions <- list(
 #' masking (if applicable). This parameter is not used for SSIM and MoranDiff but 
 #' is included for consistency with other metric functions.
 #' @return A list containing the computed SSIM and MoranDiff values.
-# extra_metrics <- function(true, pred, coords, mask) {
-#   list(
-#     SSIM = compute_ssim(true, pred, coords),
-#     MoranDiff = compute_moran_preservation(true, pred, coords)
-#   )
-# }
 extra_metrics <- function(true, pred, coords, mask) {
   has_spatial_coords <- !is.null(coords) &&
     is.data.frame(coords) &&

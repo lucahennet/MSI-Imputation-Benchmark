@@ -79,10 +79,6 @@ run_experiment <- function(mat_true, mat_na, coords, methods, metrics) {
 #'     coords.csv    – pixel coordinates
 #'     prep.rds      – preprocessing object for reverse-transform in R
 #'     metadata.json – run provenance
-#'     
-#' The <run_id> top-level folder (e.g. "msi_2026-04-22") prevents successive
-#' runs from overwriting each other. It is generated once in main.R and passed
-#' to every export call so all datasets in one pipeline run share the same tag.
 #'
 #' @param run_id  String identifying this pipeline run, e.g. "msi_2026-04-22".
 #'   Created once in main.R as: paste0(missing_model, "_", Sys.Date())

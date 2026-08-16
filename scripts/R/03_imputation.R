@@ -3,7 +3,7 @@
 # Purpose:  Implement various imputation methods for missing values in MSI data
 # Inputs:   - A numeric matrix with missing values (NA) and optional spatial coordinates
 # Outputs:  - A complete numeric matrix with imputed values replacing NA
-# Depends:  missForest, VIM, imputeLCMD, pcaMethods, NNGP, kernlab, gstat, sp
+# Depends:  missForest, gstat, kernlab, VIM, imputeLCMD, pcaMethods, MsCoreUtils
 # =============================================================================
 
 

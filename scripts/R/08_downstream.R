@@ -82,7 +82,7 @@ run_de_downstream <- function(mat, meta, contrast_col = "Group", levels = NULL,
   if (is.null(meta) || !contrast_col %in% colnames(meta)) {
     return(tibble())
   }
-
+  
   # Subset to specified levels if provided, and ensure the grouping factor is properly formed
   group_vec <- meta[[contrast_col]]
   if (!is.null(levels)) {
@@ -94,7 +94,7 @@ run_de_downstream <- function(mat, meta, contrast_col = "Group", levels = NULL,
   if (nlevels(group_fac) < 2) {
     return(tibble())
   }
-
+  
   # Log-transform once for all tests; t-tests on log-transformed data approximate log-fold changes better
   mat_log <- log1p(mat)
   purrr::map_dfr(colnames(mat_log), function(feat) {
@@ -126,7 +126,7 @@ run_clustering_downstream <- function(mat, meta = NULL, k = NULL) {
     } else {
       3L
     }
-
+  
   mat_s <- .preprocess(mat)
   set.seed(42)
   labels <- kmeans(mat_s, centers = k, nstart = 25, iter.max = 100)$cluster
@@ -153,32 +153,6 @@ run_coabundance_downstream <- function(mat, cor_threshold = 0.7) {
   list(cor_matrix = cor_mat, edges = edges, threshold = cor_threshold)
 }
 
-#' #' Fit an NMF model on the ground-truth matrix (requires RcppML).
-#' #'
-#' #' Returns NULL silently when RcppML is absent, and all downstream NMF
-#' #' comparisons will return NA without erroring.
-#' #'
-#' #' @param mat Numeric matrix (ROIs × features), fully observed.
-#' #' @param k   Number of NMF components.
-#' #' @return RcppML nmf object, or NULL.
-#' run_nmf_downstream <- function(mat, k = 5) {
-#'   if (!requireNamespace("RcppML", quietly = TRUE)) {
-#'     return(NULL)
-#'   }
-#' 
-#'   # Strip out the robust parameter from the top-level call to prevent signature mismatch errors
-#'   # RcppML's standard solver is already highly performant and handles dense matrix structures well.
-#'   tryCatch(
-#'     {
-#'       RcppML::nmf(pmax(as.matrix(mat), 0), k = k, seed = 42)
-#'     },
-#'     error = function(e) {
-#'       warning("NMF generation failed: ", e$message)
-#'       NULL
-#'     }
-#'   )
-#' }
-
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Comparisons  (compare_*  →  scalar metrics + stored full result)
@@ -192,7 +166,7 @@ run_coabundance_downstream <- function(mat, cor_threshold = 0.7) {
 #' @return List: $result, $ProcrustesSS, $VarDiffPC1, $VarDiffPC2.
 compare_pca <- function(mat, meta, gt) {
   res <- run_pca_downstream(mat, meta)
-
+  
   # Procrustes analysis on the common PCs (up to 5)
   pc_cols <- intersect(
     paste0("PC", 1:5),
@@ -201,15 +175,17 @@ compare_pca <- function(mat, meta, gt) {
   # Only compute Procrustes SS if we have at least 2 common PCs; not meaningful otherwise
   ss <- if (length(pc_cols) >= 2) {
     vegan::procrustes(as.matrix(gt$scores[, pc_cols]),
-      as.matrix(res$scores[, pc_cols]),
-      symmetric = TRUE
+                      as.matrix(res$scores[, pc_cols]),
+                      symmetric = TRUE
     )$ss
   } else {
     NA_real_
   }
-
+  
   list(
-    result       = res,
+    # Store only the scores data frame — the plots never use loadings or
+    # variance_explained from the store (scalars are already in $metrics).
+    result       = list(scores = res$scores),
     ProcrustesSS = ss,
     VarDiffPC1   = abs(gt$variance_explained[["PC1"]] - res$variance_explained[["PC1"]]),
     VarDiffPC2   = abs(gt$variance_explained[["PC2"]] - res$variance_explained[["PC2"]])
@@ -229,31 +205,31 @@ compare_de <- function(mat, meta, gt, contrast_col = "Group", levels = NULL,
   if (nrow(gt) == 0) {
     return(list(result = tibble(), Jaccard = NA_real_, RankCor = NA_real_))
   }
-
+  
   # Run DE on the imputed matrix with the same parameters as the GT to ensure a fair comparison
   res <- run_de_downstream(mat, meta,
-    contrast_col = contrast_col,
-    levels = levels, method = method
+                           contrast_col = contrast_col,
+                           levels = levels, method = method
   )
   if (nrow(res) == 0) {
     return(list(result = res, Jaccard = NA_real_, RankCor = NA_real_))
   }
-
+  
   # Define significant features based on adjusted p-value threshold
   sig_gt <- gt$feature[!is.na(gt$adj.P.Val) & gt$adj.P.Val < fdr_thresh]
   sig_imp <- res$feature[!is.na(res$adj.P.Val) & res$adj.P.Val < fdr_thresh]
-
+  
   # Jaccard similarity of significant feature sets
   common <- intersect(gt$feature, res$feature)
   rank_cor <- if (length(common) > 2) {
     cor(gt$P.Value[match(common, gt$feature)],
-      res$P.Value[match(common, res$feature)],
-      method = "spearman", use = "complete.obs"
+        res$P.Value[match(common, res$feature)],
+        method = "spearman", use = "complete.obs"
     )
   } else {
     NA_real_
   }
-
+  
   list(result = res, Jaccard = .jaccard(sig_gt, sig_imp), RankCor = rank_cor)
 }
 
@@ -287,52 +263,16 @@ compare_clustering <- function(mat, meta, gt) {
 #' @return List: $result, $EdgeJaccard.
 compare_coabundance <- function(mat, gt) {
   res <- run_coabundance_downstream(mat, cor_threshold = gt$threshold %||% 0.7)
-  edges_gt <- paste(gt$edges$feat_a, gt$edges$feat_b, sep = "||")
+  edges_gt  <- paste(gt$edges$feat_a,  gt$edges$feat_b,  sep = "||")
   edges_imp <- paste(res$edges$feat_a, res$edges$feat_b, sep = "||")
-  list(result = res, EdgeJaccard = .jaccard(edges_gt, edges_imp))
+  list(
+    # Drop cor_matrix (features × features) — far too large to store per
+    # method × prop × rep, and no plot reads it back.  Keep only the edge
+    # tibble in case future plots need edge-level detail.
+    result      = list(edges = res$edges, threshold = res$threshold),
+    EdgeJaccard = .jaccard(edges_gt, edges_imp)
+  )
 }
-
-#' #' Mean Spearman correlation of spatial NMF components (imputed projected into GT basis).
-#' #'
-#' #' @param mat Imputed matrix.
-#' #' @param gt  Ground-truth NMF object ($nmf from run_all_downstream()), or NULL.
-#' #' @return List with scalar $NMF_SpatialCor.
-#' compare_nmf <- function(mat, gt) {
-#'   # Validate that gt is a valid S4 nmf object from RcppML
-#'   if (is.null(gt) || !inherits(gt, "nmf")) {
-#'     return(list(NMF_SpatialCor = NA_real_))
-#'   }
-#' 
-#'   mat_pos <- pmax(as.matrix(mat), 0)
-#' 
-#'   # Project onto the ground truth basis slot (@h) using RcppML's native NNLS solver
-#'   w_proj <- tryCatch(
-#'     {
-#'       # Transpose projection: solves for feature matrix W given sample basis matrix H
-#'       RcppML::nnls(h = gt@h, A = mat_pos)
-#'     },
-#'     error = function(e) {
-#'       message("NMF projection failed: ", e$message)
-#'       NULL
-#'     }
-#'   )
-#' 
-#'   if (is.null(w_proj)) {
-#'     return(list(NMF_SpatialCor = NA_real_))
-#'   }
-#' 
-#'   # Calculate mean Spearman correlation across corresponding spatial component weights
-#'   cors <- vapply(
-#'     seq_len(ncol(gt@w)), function(i) {
-#'       if (i > ncol(w_proj)) {
-#'         return(NA_real_)
-#'       }
-#'       cor(gt@w[, i], w_proj[, i], method = "spearman", use = "complete.obs")
-#'     },
-#'     numeric(1)
-#'   )
-#'   list(NMF_SpatialCor = mean(cors, na.rm = TRUE))
-#' }
 
 #' Spearman correlation of per-feature variances (detects over-smoothing).
 #'
@@ -346,6 +286,98 @@ compare_feature_variance <- function(mat, gt) {
     return(NA_real_)
   }
   cor(v_gt, v_imp, method = "spearman", use = "complete.obs")
+}
+
+#' Compute mean Kolmogorov-Smirnov statistic across all features to check distribution shift.
+#'
+#' Both matrices are log1p-transformed before comparison so the scale matches
+#' the rest of the pipeline.  Ties are broken by jittering (suppresses the
+#' ks.test "cannot compute exact p-value with ties" warning that is expected
+#' for integer/zero-inflated MS data and does not affect the D statistic).
+#'
+#' @param mat Imputed matrix (ROIs × features).
+#' @param gt  Ground-truth matrix (ROIs × features).
+#' @return Scalar — mean KS D-statistic across features (lower = better).
+compare_feature_distributions <- function(mat, gt) {
+  common_feats <- intersect(colnames(gt), colnames(mat))
+  if (length(common_feats) == 0) return(NA_real_)
+  
+  gt_log  <- log1p(gt[,  common_feats, drop = FALSE])
+  mat_log <- log1p(mat[, common_feats, drop = FALSE])
+  
+  ks_stats <- vapply(common_feats, function(feat) {
+    x <- gt_log[, feat]
+    y <- mat_log[, feat]
+    # suppressWarnings: ties warning is cosmetic; D statistic is unaffected
+    res <- tryCatch(
+      suppressWarnings(ks.test(x, y)),
+      error = function(e) NULL
+    )
+    if (is.null(res)) NA_real_ else res$statistic[[1L]]
+  }, numeric(1))
+  
+  mean(ks_stats, na.rm = TRUE)
+}
+
+#' Compare PLS-DA subspace tracking vs Ground Truth
+#'
+#' Fits a PLS-DA model on the imputed matrix and measures how well its
+#' discriminant subspace matches the ground-truth model via Procrustes SS.
+#'
+#' @param mat          Imputed matrix (ROIs × features).
+#' @param meta         Metadata data frame.
+#' @param gt           Ground-truth PLS-DA object ($plsda_gt from run_all_downstream()).
+#' @param contrast_col Column in meta encoding the grouping factor.
+#' @return List: $result (plsr model or NULL), $PLS_ProcrustesSS (scalar).
+compare_plsda <- function(mat, meta, gt, contrast_col = "Group") {
+  if (is.null(meta) || !contrast_col %in% colnames(meta) ||
+      !requireNamespace("pls", quietly = TRUE)) {
+    return(list(result = NULL, PLS_ProcrustesSS = NA_real_))
+  }
+  
+  group_factor <- factor(meta[[contrast_col]])
+  if (nlevels(group_factor) < 2 || is.null(gt$result)) {
+    return(list(result = NULL, PLS_ProcrustesSS = NA_real_))
+  }
+  
+  Y_dummy  <- model.matrix(~ group_factor - 1)
+  X_scaled <- .preprocess(mat)
+  
+  # ncomp must be < nrow(X) and <= ncol(X); cap at 2 discriminant components
+  ncomp_safe <- min(2L, nrow(X_scaled) - 1L, ncol(X_scaled))
+  if (ncomp_safe < 1L) return(list(result = NULL, PLS_ProcrustesSS = NA_real_))
+  
+  mod_res <- tryCatch(
+    pls::plsr(Y_dummy ~ X_scaled, ncomp = ncomp_safe, method = "oscorespls"),
+    error = function(e) NULL
+  )
+  if (is.null(mod_res)) return(list(result = NULL, PLS_ProcrustesSS = NA_real_))
+  
+  # pls::scores() returns a 3-D array [obs × comp × responses] for plsr;
+  # drop the third dimension to get the [obs × comp] score matrix.
+  extract_scores <- function(model, n) {
+    s <- pls::scores(model)
+    if (length(dim(s)) == 3L) s <- s[, seq_len(n), 1L, drop = FALSE]
+    else                       s <- s[, seq_len(n), drop = FALSE]
+    s
+  }
+  
+  n_comp_common <- min(ncomp_safe, dim(pls::scores(gt$result))[2L])
+  gt_scores  <- extract_scores(gt$result, n_comp_common)
+  imp_scores <- extract_scores(mod_res,   n_comp_common)
+  
+  ss <- tryCatch(
+    vegan::procrustes(gt_scores, imp_scores, symmetric = TRUE)$ss,
+    error = function(e) NA_real_
+  )
+  
+  # Store only the score matrix — the full plsr model carries fitted values,
+  # residuals, and the entire X matrix, making it very large.  plot_plsda_overlay
+  # needs only the [obs × comp] scores to draw the scatter.
+  imp_scores_df        <- as.data.frame(imp_scores)
+  colnames(imp_scores_df) <- paste0("LV", seq_len(ncol(imp_scores_df)))
+  
+  list(result = imp_scores_df, PLS_ProcrustesSS = ss)
 }
 
 
@@ -378,7 +410,7 @@ DOWNSTREAM_MODULES <- list(
     extra_args = list()
   ),
   de_ttest = list(
-    store_key  = "de_t_store",
+    store_key  = NULL,   # full DE table not needed after scalars are extracted
     gt_key     = "de_t",
     compare_fn = compare_de,
     metrics    = c("TTest_Jaccard", "TTest_RankCor"),
@@ -386,7 +418,7 @@ DOWNSTREAM_MODULES <- list(
     extra_args = list(method = "t.test")
   ),
   de_wilcox = list(
-    store_key  = "de_w_store",
+    store_key  = NULL,   # full DE table not needed after scalars are extracted
     gt_key     = "de_w",
     compare_fn = compare_de,
     metrics    = c("Wilcox_Jaccard", "Wilcox_RankCor"),
@@ -409,22 +441,28 @@ DOWNSTREAM_MODULES <- list(
     needs_meta = FALSE,
     extra_args = list()
   ),
-  # Compare-only modules: gt_key points to a sub-object inside ground_truth,
-  # result is a scalar (no full object worth storing separately).
-  # nmf = list(
-  #   store_key  = NULL,
-  #   gt_key     = "nmf",
-  #   compare_fn = compare_nmf,
-  #   metrics    = "NMF_SpatialCor",
-  #   needs_meta = FALSE,
-  #   extra_args = list()
-  # ),
   feature_variance = list(
     store_key  = NULL,
     gt_key     = "mat_true",
     compare_fn = compare_feature_variance,
     metrics    = "FeatureVarCor",
     needs_meta = FALSE,
+    extra_args = list()
+  ),
+  distribution_match = list(
+    store_key  = NULL,
+    gt_key     = "mat_true",
+    compare_fn = compare_feature_distributions,
+    metrics    = "MeanKSDistance",
+    needs_meta = FALSE,
+    extra_args = list()
+  ),
+  plsda = list(
+    store_key  = "pls_store",
+    gt_key     = "plsda_gt", # Will map to the run_all_downstream generation step
+    compare_fn = compare_plsda,
+    metrics    = "PLS_ProcrustesSS",
+    needs_meta = TRUE,
     extra_args = list()
   )
 )
@@ -448,10 +486,10 @@ DOWNSTREAM_MODULES <- list(
 run_all_downstream <- function(mat, meta = NULL, contrast_col = "Group",
                                de_levels = NULL, cor_threshold = 0.7) {
   has_de <- !is.null(meta) && contrast_col %in% colnames(meta)
-
+  
   message("  [downstream] PCA ...")
   pca <- run_pca_downstream(mat, meta)
-
+  
   message(
     if (has_de) {
       paste0("  [downstream] DE (", contrast_col, ") ...")
@@ -461,31 +499,51 @@ run_all_downstream <- function(mat, meta = NULL, contrast_col = "Group",
   )
   de_t <- run_de_downstream(mat, meta, contrast_col, de_levels, "t.test")
   de_w <- run_de_downstream(mat, meta, contrast_col, de_levels, "wilcoxon")
-
+  
   message("  [downstream] Clustering ...")
   clust <- run_clustering_downstream(mat, meta)
-
+  
   message("  [downstream] Co-abundance network ...")
-  coab <- run_coabundance_downstream(mat, cor_threshold)
-
-  # message("  [downstream] NMF factorisation ...")
-  # nmf <- run_nmf_downstream(mat)
-
+  coab_full <- run_coabundance_downstream(mat, cor_threshold)
+  # Drop the full correlation matrix from the stored GT object — it's
+  # features × features and is only needed transiently inside compare_coabundance.
+  coab <- list(
+    edges     = coab_full$edges,
+    threshold = coab_full$threshold
+  )
+  
+  message("  [downstream] PLS-DA baseline structure ...")
+  plsda_gt <- list(result = NULL)
+  if (has_de && requireNamespace("pls", quietly = TRUE)) {
+    group_factor <- factor(meta[[contrast_col]])
+    if (nlevels(group_factor) >= 2) {
+      Y_dummy  <- model.matrix(~ group_factor - 1)
+      X_scaled <- .preprocess(mat)
+      # ncomp must be < nrow(X) and <= ncol(X)
+      ncomp_safe <- min(2L, nrow(X_scaled) - 1L, ncol(X_scaled))
+      if (ncomp_safe >= 1L) {
+        plsda_gt$result <- tryCatch(
+          pls::plsr(Y_dummy ~ X_scaled, ncomp = ncomp_safe, method = "oscorespls"),
+          error = function(e) NULL
+        )
+      }
+    }
+  }
+  
   list(
     mat_true    = mat,
     pca         = pca,
     de_t        = de_t,
     de_w        = de_w,
     clustering  = clust,
-    coabundance = coab# ,
-    # nmf         = nmf
+    coabundance = coab,
+    plsda_gt    = plsda_gt
   )
 }
 
 
 #' Compare every imputed matrix (all methods × props × replicates) against
 #' the ground truth using all modules defined in DOWNSTREAM_MODULES.
-#' TODO
 compute_downstream_comparison <- function(results_storage, meta = NULL, ground_truth,
                                           contrast_col = "Group", de_levels = NULL) {
   stores <- Filter(
@@ -495,32 +553,32 @@ compute_downstream_comparison <- function(results_storage, meta = NULL, ground_t
   store_env <- list2env(
     setNames(replicate(length(stores), list(), simplify = FALSE), unname(stores))
   )
-
+  
   all_metrics <- unlist(lapply(DOWNSTREAM_MODULES, `[[`, "metrics"), use.names = FALSE)
-
+  
   .na_row <- function(method, prop, rep_idx) {
     extra <- setNames(as.list(rep(NA_real_, length(all_metrics))), all_metrics)
     do.call(tibble, c(list(method = method, prop = prop, rep = rep_idx), extra))
   }
-
+  
   metrics_df <- map_dfr(names(results_storage), function(rep_key) {
     rep_idx <- as.integer(str_extract(rep_key, "\\d+"))
-
+    
     for (sk in ls(store_env)) store_env[[sk]][[rep_key]] <- list()
-
+    
     map_dfr(names(results_storage[[rep_key]]), function(p_str) {
       prop <- as.numeric(p_str)
       imputed_list <- results_storage[[rep_key]][[p_str]]$imputed
       if (is.null(imputed_list) || length(imputed_list) == 0) {
         return(tibble())
       }
-
+      
       for (sk in ls(store_env)) store_env[[sk]][[rep_key]][[p_str]] <- list()
-
+      
       map_dfr(names(imputed_list), function(method_name) {
         mat_imp <- imputed_list[[method_name]]
         message("  Downstream [", rep_key, "][p=", p_str, "] – ", method_name)
-
+        
         tryCatch(
           {
             module_results <- lapply(DOWNSTREAM_MODULES, function(mod) {
@@ -532,7 +590,7 @@ compute_downstream_comparison <- function(results_storage, meta = NULL, ground_t
               }
               do.call(mod$compare_fn, c(base, mod$extra_args))
             })
-
+            
             for (mod_name in names(DOWNSTREAM_MODULES)) {
               sk <- DOWNSTREAM_MODULES[[mod_name]]$store_key
               if (!is.null(sk)) {
@@ -540,12 +598,12 @@ compute_downstream_comparison <- function(results_storage, meta = NULL, ground_t
                 store_env[[sk]][[rep_key]][[p_str]][[method_name]] <<- res_obj$result %||% res_obj
               }
             }
-
+            
             # PATCHED: Maps returns to metric names if fields are missing
             scalars <- unlist(lapply(names(DOWNSTREAM_MODULES), function(mod_name) {
               mod <- DOWNSTREAM_MODULES[[mod_name]]
               res_obj <- module_results[[mod_name]]
-
+              
               setNames(lapply(mod$metrics, function(m) {
                 if (!is.list(res_obj)) {
                   return(res_obj)
@@ -553,17 +611,17 @@ compute_downstream_comparison <- function(results_storage, meta = NULL, ground_t
                 if (m %in% names(res_obj)) {
                   return(res_obj[[m]])
                 }
-
+                
                 # Check for un-prefixed fallback alternatives inside compare_de
                 fallback <- str_remove(m, "^(TTest_|Wilcox_)")
                 if (fallback %in% names(res_obj)) {
                   return(res_obj[[fallback]])
                 }
-
+                
                 return(NA_real_)
               }), mod$metrics)
             }), recursive = FALSE)
-
+            
             do.call(tibble, c(
               list(method = method_name, prop = prop, rep = rep_idx),
               scalars
@@ -577,6 +635,6 @@ compute_downstream_comparison <- function(results_storage, meta = NULL, ground_t
       })
     })
   })
-
+  
   c(list(metrics = metrics_df), as.list(store_env))
 }

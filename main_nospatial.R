@@ -122,47 +122,47 @@ imputation_methods <- list(
   #   transform = "none",
   #   scaling = "none"
   # ),
-  median = list(
+  Median = list(
     fun = impute_median,
     transform = "none",
     scaling = "none"
   ),
-  half_min = list(
+  HM = list(
     fun = impute_half_min,
     transform = "none",
     scaling = "none"
   ),
-  missForest = list(
+  RF = list(
     fun = impute_missForest,
     transform = "log1p",
     scaling = "none"
   ),
-  knn = list(
+  KNN = list(
     fun = impute_knn,
     transform = "log1p",
     scaling = "pareto"
   ),
-  qrilc = list(
+  QRILC = list(
     fun = impute_qrilc,
     transform = "log1p",
     scaling = "none"
   ),
-  ppca = list(
+  PPCA = list(
     fun = impute_ppca,
     transform = "log1p",
     scaling = "pareto"
   ),
-  bpca = list(
+  BPCA = list(
     fun = impute_bpca,
     transform = "log1p",
     scaling = "pareto"
-  ),
-  svd = list(
-    fun = impute_svd,
-    transform = "log1p",
-    scaling = "pareto"
   )# ,
-  # nngp = list(
+  # SVD = list(
+  #   fun = impute_svd,
+  #   transform = "log1p",
+  #   scaling = "pareto"
+  # ),
+  # NNGP = list(
   #   fun = impute_nngp,
   #   transform = "none",
   #   scaling = "none"
@@ -303,13 +303,9 @@ saveRDS(
 
 list.files(path = "results", pattern = "\\.rds")
 
-exp <- readRDS("results/benchmark_nospatial_mcar_mcar_2026-06-04_20reps.rds")
-exp <- readRDS("results/benchmark_nospatial_mnar_mnar_2026-06-04_20reps.rds")
-exp <- readRDS("results/benchmark_nospatial_hybrid_hybrid_2026-06-04_20reps.rds")
-
-exp <- readRDS("results/benchmark_20220118_POSNEG_combined_all_samples.xlsx_mcar_2026-05-07_1reps.rds")
-exp <- readRDS("results/benchmark_20220118_POSNEG_combined_all_samples.xlsx_mnar_2026-05-06_1reps.rds")
-exp <- readRDS("results/benchmark_20220118_POSNEG_combined_all_samples.xlsx_hybrid_2026-05-07_1reps.rds")
+exp <- readRDS("results/benchmark_nospatial_mcar_mcar_2026-06-16_50reps.rds")
+exp <- readRDS("results/benchmark_nospatial_mnar_mnar_2026-06-16_50reps.rds")
+exp <- readRDS("results/benchmark_nospatial_hybrid_hybrid_2026-06-16_50reps.rds")
 
 all_results     <- exp$all_results
 results_storage <- exp$results_storage
@@ -322,13 +318,13 @@ source("scripts/R/07_visualisation.R")
 
 # Aggregated metric plots (mean ± ribbon across replicates)
 plot_metric(all_results, "NRMSE")
-plot_metric(all_results, "MAE")
-plot_metric(exp$all_results, "CCC", type='bar')
+# plot_metric(all_results, "MAE")
+# plot_metric(all_results, "CCC", type='bar')
 plot_metric(all_results, "VarRatio",   y_label = "Mean Variance Ratio")
-plot_metric(exp$all_results, "CorStruct",  y_label = "Correlation of Correlation Matrices")
+plot_metric(all_results, "CorStruct",  y_label = "Correlation of Correlation Matrices")
 
-plot_runtime_vs_nrmse(exp$all_results)
-plot_spectral_preservation(exp$all_results)
+plot_runtime_vs_nrmse(all_results)
+plot_spectral_preservation(all_results)
 
 
 # Downstream analyses -------------------------------------------------------
@@ -381,14 +377,22 @@ saveRDS(
 # -- Load a previous experiment ---------------------------------------------
 list.files(path = "results/downstream", pattern = "\\.rds")
 
-downstream_results <- readRDS("results/downstream/downstream_20220118_POSNEG_combined_all_samples.xlsx_hybrid_2026-05-27_1reps.rds")
+downstream_data <- readRDS("results/downstream/benchmark_nospatial_mcar_mcar_2026-06-16_50reps_downstream.rds")
+downstream_data <- readRDS("results/downstream/benchmark_nospatial_mnar_mnar_2026-06-16_50reps_downstream.rds")
+downstream_data <- readRDS("results/downstream/benchmark_nospatial_hybrid_hybrid_2026-06-16_50reps_downstream.rds")
+
+# downstream_results <- downstream_data$metrics
+# gt_downstream      <- downstream_data$gt
+downstream_results <- downstream_data$downstream_results
+gt_downstream      <- downstream_data$gt_downstream
+meta               <- downstream_data$meta
 
 # -- Plots ------------------------------------------------------------------
 
 # PCA
 plot_pca_overlay(downstream_results, gt_downstream, target_prop = 0.1, rep_idx = 1)
 plot_pca_overlay(downstream_results, gt_downstream, target_prop = 0.4, rep_idx = 1)
-plot_pca_overlay(downstream_results, gt_downstream, target_prop = 0.4, colour_by = "Regions")
+plot_pca_overlay(downstream_results, gt_downstream, target_prop = 0.1, colour_by = "Regions", meta = meta)
 plot_procrustes(downstream_results)
 
 # Differential

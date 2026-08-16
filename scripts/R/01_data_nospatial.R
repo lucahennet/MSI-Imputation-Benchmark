@@ -1,13 +1,9 @@
 # =============================================================================
 # 01_data_nospatial.R
-# Purpose:  Load ...
-# Inputs:   - A root directory containing one TXT subfolder and N CSV subfolders
-# Outputs:  - raw_wide       : wide-format data frame (pixels × features)
-#           - df_visualisation: long-format, TIC-normalised, for plotting
-#           - df_impute      : clean wide matrix ready for imputation
-#           - coords         : data frame of X/Y pixel coordinates
-#           - mat_impute     : numeric matrix (pixels × features), no metadata
-# Depends:  tidyverse, stringr
+# Purpose:  Load and process non-spatial MSI datasets from Excel files
+# Inputs:   - A root directory containing one Excel file
+# Outputs:  - 
+# Depends:  tidyverse, stringr, readxl, zoo
 # =============================================================================
 
 

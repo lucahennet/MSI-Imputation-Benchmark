@@ -1,6 +1,6 @@
 # =============================================================================
 # main_mix-missingness.R
-# Purpose:  
+# Purpose: 
 #
 # Structure:
 #   PART 1 — 
@@ -207,8 +207,9 @@ PATIENTS <- list(
 # Pre-load all raw matrices
 raw_mats <- list()
 for (pt in PATIENTS) {
+  message("Processing patient ", pt$id)
   raw_mats[[pt$id]] <- list(NEG = load_mat(pt$neg_path), POS = load_mat(pt$pos_path))
-}
+}; message("Done loading.")
 
 # Common features across all patients (per mode)
 common_neg <- Reduce(intersect, map(raw_mats, \(pt) colnames(pt$NEG$mat)))
@@ -230,8 +231,7 @@ for (pt in PATIENTS) {
     NEG = build_long(neg$mat, coords_neg, pt$id, "NEG"),
     POS = build_long(pos$mat, coords_pos, pt$id, "POS")
   )
-}
-message("Done loading.")
+}; message("Done loading.")
 
 # Full-feature summaries
 full <- build_summaries(long_data)
@@ -335,6 +335,9 @@ ds_summary |>
   ) |>
   print(n = Inf)
 
+plot_zone_summary(zone_summary)              # all patients, markers only
+plot_feature_classes(class_counts)           # all patients, markers 
+
 # --- GLOBAL summary (marker subset) ---
 message("\n=== Dataset summary (FIBROSIS MARKERS only) ===")
 ds_summary_markers |>
@@ -377,7 +380,7 @@ plot_feature_classes(class_counts_markers)           # all patients, markers
 # Approach A gives a global trend
 # Approach B gives local evidence
 
- 
+
 if (!exists("long_data_markers")) stop("Run missing_structure.R first (need long_data).")
 
 
@@ -426,7 +429,7 @@ corr_by_group <- fim_all |>
     n_features = n(),
     # correlate log intensity with missingness rate
     spearman_rho = cor(log1p(mean_obs_int), prop_missing,
-      method = "spearman", use = "complete.obs"
+                       method = "spearman", use = "complete.obs"
     ),
     .groups = "drop"
   )
@@ -437,13 +440,13 @@ corr_pooled <- fim_all |>
   summarise(
     n_features = n(),
     spearman_rho = cor(log1p(mean_obs_int), prop_missing,
-      method = "spearman", use = "complete.obs"
+                       method = "spearman", use = "complete.obs"
     ),
     .groups = "drop"
   )
 
-message("\n=== Approach A: intensity vs missingness (Spearman rho) ===")
-message("  (negative rho = low intensity -> more missing = MNAR-consistent)")
+message("\n=== Approach A: intensity vs missingness (Spearman rho) ===\n
+(negative rho = low intensity -> more missing = MNAR-consistent)")
 message("\n  Per patient x mode:")
 print(corr_by_group)
 message("\n  Pooled per mode:")
@@ -454,12 +457,13 @@ print(corr_pooled)
 # Group features into intensity bins and show missingness rate per bin.
 # The intensity level where missingness climbs sharply is the MNAR/MCAR split.
 
-INTENSITY_BREAKS <- c(0, 0.5, 1, 2, 5, 10, 50, 100, Inf)
+# INTENSITY_BREAKS <- c(0, 0.5, 1, 2, 5, 10, 50, 100, Inf)
+INTENSITY_BREAKS <- c(0, 0.5, 1, 2, 5, 10, Inf)
 
 threshold_table <- fim_all |>
   mutate(int_bin = cut(mean_obs_int,
-    breaks = INTENSITY_BREAKS,
-    include.lowest = TRUE, right = FALSE
+                       breaks = INTENSITY_BREAKS,
+                       include.lowest = TRUE, right = FALSE
   )) |>
   group_by(mode, int_bin) |>
   summarise(
@@ -470,9 +474,8 @@ threshold_table <- fim_all |>
     .groups = "drop"
   )
 
-message("\n=== Approach A: missingness by intensity bin (pooled) ===")
-message("  (if missingness is high at low intensity and drops off, that")
-message("   transition point is your MNAR/MCAR threshold)")
+message("\n=== Approach A: missingness by intensity bin (pooled) ===\n
+(if missingness is high at low intensity and drops off, that transition point is your MNAR/MCAR threshold)")
 print(threshold_table, n = Inf)
 
 
@@ -497,7 +500,7 @@ within_feature_shift <- function(long_df, patient, mode) {
       .groups = "drop"
     ) |>
     mutate(zone_has_missing = n_missing > 0)
-
+  
   # Per feature: compare median observed intensity in missing vs non-missing zones
   fz |>
     filter(!is.na(median_obs_int)) |>
@@ -538,9 +541,8 @@ wfs_summary <- wfs_all |>
     .groups = "drop"
   )
 
-message("\n=== Approach B: within-feature intensity shift (confirmation) ===")
-message("  frac_mnar_like = fraction of features with LOWER observed intensity")
-message("  in zones where they also go missing (MNAR-consistent).")
+message("\n=== Approach B: within-feature intensity shift (confirmation) ===\n
+frac_mnar_like = fraction of features with LOWER observed intensity in zones where they also go missing (MNAR-consistent).")
 print(wfs_summary)
 
 
@@ -553,8 +555,8 @@ pA1 <- fim_all |>
   geom_smooth(method = "loess", se = TRUE, colour = "#E24B4A", linewidth = 0.8) +
   geom_vline(xintercept = 1, linetype = "dashed", colour = "grey40") +
   annotate("text",
-    x = 1, y = 95, label = "intensity = 1", hjust = -0.1,
-    size = 2.8, colour = "grey40"
+           x = 1, y = 95, label = "intensity = 1", hjust = -0.1,
+           size = 2.8, colour = "grey40"
   ) +
   scale_x_log10() +
   facet_wrap(~mode) +
@@ -577,10 +579,10 @@ pA2 <- threshold_table |>
   ggplot(aes(x = int_bin, y = mean_missingness, fill = mode)) +
   geom_col(position = position_dodge(), width = 0.7) +
   geom_text(aes(label = n_features),
-    position = position_dodge(width = 0.7),
-    vjust = -0.3, size = 2.5
+            position = position_dodge(width = 0.7),
+            vjust = -0.3, size = 2.5
   ) +
-  scale_fill_manual(values = c(NEG = "#378ADD", POS = "#E07B39"), name = NULL) +
+  scale_fill_manual(values = c(NEG = "#378ADD", POS = "#E24B4A"), name = NULL) +
   labs(
     title = "Approach A: mean missingness by intensity bin",
     subtitle = "Bar labels = number of features in each bin. High missingness at low intensity = MNAR-consistent.",
@@ -605,10 +607,10 @@ pB <- wfs_all |>
   ) +
   geom_vline(xintercept = 0, linetype = "dashed", colour = "grey30") +
   annotate("text",
-    x = 0, y = Inf, label = "  MNAR-like <-- | --> not MNAR",
-    hjust = 0.5, vjust = 1.5, size = 2.8, colour = "grey40"
+           x = 0, y = Inf, label = "  MNAR-like <-- | --> not MNAR",
+           hjust = 0.5, vjust = 1.5, size = 2.8, colour = "grey40"
   ) +
-  scale_fill_manual(values = c(NEG = "#378ADD", POS = "#E07B39"), name = NULL) +
+  scale_fill_manual(values = c(NEG = "#378ADD", POS = "#E24B4A"), name = NULL) +
   facet_wrap(~mode, ncol = 1) +
   labs(
     title = "Approach B: within-feature intensity shift",
@@ -639,7 +641,12 @@ CFG <- list(
   props        = c(0.05),
   # reps         = 3,
   reps         = 1,
-  mnar_frac    = 0.5,      # fraction of features assigned MNAR (at random)
+  # mnar_frac    = 0.5,      # OVERALL fraction of features that are MNAR
+  mnar_frac    = 0.67, # determined from Approach B
+  target_rho   = NULL,     # per-mode intensity/missingness coupling.
+  # Set AFTER feat_summary exists (see below) with
+  # target_rho_from_summary(); a named c(NEG=, POS=)
+  # vector. NULL here = old random assignment until set.
   min_features = 20,       # skip a zone with fewer complete features
   min_observed = 5,        # keep at least this many observed pixels per feature
   seed_base    = 42,
@@ -649,33 +656,164 @@ CFG <- list(
 
 SPECS <- list(
   RF    = list(fun = impute_missForest, transform = "log1p", scaling = "none"),
-  QRILC = list(fun = impute_qrilc,      transform = "log1p", scaling = "none")
+  QRILC = list(fun = impute_qrilc, transform = "log1p", scaling = "none")
 )
 
+# --- Calibrate target_rho from the FULL feature set (per mode) ---------------
+# Computed live from feat_summary (built at line ~240) so it is traceable, not
+# a hard-coded constant. Uses the full common features, not the marker subset.
+rho_tbl <- target_rho_from_summary(feat_summary)
+message("Intensity/missingness coupling (Spearman rho) per mode:")
+print(rho_tbl)
+
+CFG$target_rho <- c(
+  NEG = rho_tbl |> filter(mode == "NEG") |> pull(rho),
+  POS = rho_tbl |> filter(mode == "POS") |> pull(rho)
+)
+message(
+  "CFG$target_rho set to: ",
+  paste(names(CFG$target_rho), round(CFG$target_rho, 3),
+    sep = "=", collapse = "  "
+  )
+)
+
+# Run the benchmark on the fibrosis-marker subset of features
 validate_setup()
 zones <- zones_from_long(long_data_markers)
 dry_run(zones)
-res  <- run_benchmark(zones, resume = FALSE)
+res <- run_benchmark(zones, resume = FALSE)
 summ <- summarise_benchmark(res)
-save_benchmark(res, zones)        # add zones to enable heatmaps on reload
+save_benchmark(res, zones)       # add zones to enable heatmaps on reload
 
+res |> filter(subset == "overall") |>
+  group_by(prop, method) |> summarise(RMSE = mean(RMSE), .groups = "drop") |>
+  pivot_wider(names_from = method, values_from = RMSE) |>
+  mutate(oracle_gain_pct = 100 * (RF - Oracle) / RF)
 
 # =============================================================================
 # MIX DATA PLOTS
 # =============================================================================
+res <- readRDS("results/benchmark/zone_benchmark_67pct_50reps_2026-07-31.rds")$results
 
-res <- readRDS("results/benchmark/zone_benchmark_3reps_2026-07-27.rds")$results
-res <- readRDS("results/benchmark/zone_benchmark_1reps_2026-07-27.rds")$results
 all_tests(res)
-plot_metric(res, "RMSE", "MNAR")
-plot_gain(res)
-ins <- inspect_unit(zones, "P1_NEG_N1", prop = 0.05); visualise_heatmaps(ins, 1)
 
-plot_metric(res, "RMSE",  subset = "overall")              # line
+plot_metric(res, "RMSE",  subset = "overall") # line
+plot_metric(res, "RMSE",  subset = "MCAR",    type = "bar") # bar, faceted by prop
 plot_metric(res, "RMSE",  subset = "MNAR",    type = "bar") # bar, faceted by prop
-plot_metric(res, "NRMSE", subset = "MCAR",    type = "bar")
-plot_metric(res, "NRMSE", subset = "overall")
+
+# plot_metric(res, "NRMSE", subset = "overall")
 plot_metric(res, "SAM",   subset = "overall")
-plot_gain(res)          # alias -> plot_gain
-plot_spatial_fidelity(res)     # uses SSIM + MoranDiff
+plot_gain(res)
+plot_spatial_fidelity(res) # uses SSIM + MoranDiff
 plot_spectral_preservation(res) # uses VarRatio + CorStruct
+
+# Plots manuscript --------------------------------------------------------
+
+# source("scripts/R/07.2_plots_manuscript.R")
+
+# plot_zone_summary(zone_summary, export_prefix = "figures/zone_missingness")
+# plot_feature_classes(class_counts, export_prefix = "figures/feature_classes")
+
+# mash <- readRDS("results/benchmark/zone_benchmark_67pct_50reps_2026-07-31.rds")$results
+
+# Group them in a named list
+# datasets <- list("MASH Datasets" = mash)
+# 
+# p_rmse <- plot_metric_line(
+#   df_list       = datasets,
+#   metric_name   = "RMSE",
+#   y_label       = "RMSE",
+#   ylim          = c(0, NA),          # RMSE isn't 0–1, let it autoscale
+#   subset        = "overall",
+#   error         = "se",
+#   export_prefix = "figures/RMSE_MIX",
+#   width = 8, height = 3.5
+# )
+# print(p_rmse)
+# 
+# p_sam <- plot_metric_line(
+#   df_list = datasets, 
+#   metric_name = "SAM", 
+#   y_label = "SAM",
+#   ylim = c(0, 0.16), 
+#   subset = "overall", 
+#   error = "se",
+#   export_prefix = "figures/SAM_MIX"
+# )
+# print(p_sam)
+# 
+# plot_spatial_fidelity(
+#   datasets,
+#   export_prefix = "figures/spatial_MIX"
+# )
+# 
+# plot_spectral_preservation(
+#   datasets,
+#   export_prefix = "figures/spectral_MIX"
+# )
+# 
+# p_gain <- plot_gain(
+#   df_list       = datasets,
+#   base_method   = "RF",
+#   target_method = "Oracle",
+#   metric_name   = "RMSE",
+#   export_prefix = "figures/gain_MIX",
+#   width         = 8, height = 2.5
+# )
+# print(p_gain)
+# 
+# p_bar <- plot_subset_bar(
+#   df_list       = datasets,
+#   metric_name   = "RMSE",
+#   subsets       = c("MCAR", "MNAR"),
+#   error         = "se",
+#   export_prefix = "figures/bar_subsets_MIX",
+#   width         = 8, height = 4
+# )
+# print(p_bar)
+# # 
+# pA1
+# pA2
+# pA_combined
+# 
+# save_approachA()
+
+
+# Downstream --------------------------------------------------------------
+
+bundle <- readRDS("results/benchmark/zone_benchmark_67pct_50reps_2026-08-10.rds")
+res    <- bundle$results # already has ProcrustesSS, VarDiffPC1, VarDiffPC2 columns
+
+# Sanity check: how much coverage / any NAs left over?
+res |>
+  filter(subset == "overall") |>
+  summarise(
+    n           = n(),
+    n_na        = sum(is.na(ProcrustesSS)),
+    mean_ss     = mean(ProcrustesSS, na.rm = TRUE)
+  )
+
+# Build the mode-split "datasets" list, same as NRMSE/SAM style
+# procrustes_by_mode <- res |>
+#   filter(subset == "overall") |>
+#   mutate(mode = str_extract(zone, "NEG|POS"))
+# 
+# downstream_datasets <- list(
+#   "NEG" = procrustes_by_mode |> filter(mode == "NEG"),
+#   "POS" = procrustes_by_mode |> filter(mode == "POS")
+# )
+
+procrustes_by_mode <- res |>
+  filter(subset == "overall")
+
+downstream_datasets <- list(
+  "MASH Datasets" = procrustes_by_mode
+)
+
+# plot_metric_line(
+#   downstream_datasets, "ProcrustesSS",
+#   y_label       = expression(paste("SS", italic("")[proc], "")),
+#   ylim          = c(0, NA),
+#   error = "se",
+#   export_prefix = "figures/ProcrustesSS_MIX"
+# )

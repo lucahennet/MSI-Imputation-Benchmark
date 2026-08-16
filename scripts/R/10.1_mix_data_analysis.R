@@ -1,5 +1,15 @@
+# =============================================================================
+# 10.1_mix_missingness_analysis.R
+# Purpose:  Analyze missingness in the MASH datasets and produce summary tables and plots
+# Inputs:   - 
+# Outputs:  - 
+# Depends:  tidyverse
+# =============================================================================
+
+
 # Core functions ----------------------------------------------------------
 
+# Load a single patient dataset (wide format) and return a list with coordinates and numeric matrix
 load_mat <- function(data_path) {
   raw_wide <- assemble_msi_data(data_path) |> distinct(X, Y, .keep_all = TRUE)
   feature_cols <- colnames(raw_wide)[8:ncol(raw_wide)]
@@ -10,12 +20,14 @@ load_mat <- function(data_path) {
   )
 }
 
+# Annotate each pixel with its zone_id and tissue_type based on ROI ranges
 annotate_zones <- function(coords, zone_meta) {
   coords |>
     left_join(zone_meta, by = join_by(ROI >= ROI_min, ROI <= ROI_max)) |>
     select(-ROI_min, -ROI_max)
 }
 
+# Reshape a wide matrix into long format, adding coordinates and patient/mode metadata
 build_long <- function(mat, coords, patient, mode) {
   as_tibble(mat) |>
     bind_cols(coords) |>
@@ -55,11 +67,11 @@ summarise_dataset <- function(long_df, patient, mode) {
     n_features_w_missing = long_df |>
       group_by(feature) |> summarise(a = any(missing)) |> pull(a) |> sum(),
     pct_features_missing = 100 * (long_df |>
-                                    group_by(feature) |> summarise(a = any(missing)) |> pull(a) |> mean()),
+      group_by(feature) |> summarise(a = any(missing)) |> pull(a) |> mean()),
     n_pixels_w_missing = long_df |>
       group_by(X, Y) |> summarise(a = any(missing), .groups = "drop") |> pull(a) |> sum(),
     pct_pixels_missing = 100 * (long_df |>
-                                  group_by(X, Y) |> summarise(a = any(missing), .groups = "drop") |> pull(a) |> mean())
+      group_by(X, Y) |> summarise(a = any(missing), .groups = "drop") |> pull(a) |> mean())
   )
 }
 
@@ -83,6 +95,9 @@ summarise_features <- function(long_df, patient, mode) {
     summarise(
       n_pixels = n(), n_missing = sum(missing), n_observed = n() - sum(missing),
       prop_missing = mean(missing), pct_missing = 100 * mean(missing),
+      # observed-only mean intensity (missing values have no intensity);
+      # needed to compute the intensity/missingness coupling (target_rho)
+      mean_obs_int = mean(intensity[!missing]),
       .groups = "drop"
     ) |>
     mutate(
@@ -92,6 +107,22 @@ summarise_features <- function(long_df, patient, mode) {
     arrange(desc(prop_missing))
 }
 
+#' Empirical intensity/missingness coupling (Spearman), per mode, pooled
+#' across patients. Computed directly from feat_summary — no re-walk of the
+#' raw data. This is what calibrates CFG$target_rho.
+target_rho_from_summary <- function(feat_summary) {
+  feat_summary |>
+    filter(!is.na(mean_obs_int)) |>
+    group_by(mode) |>
+    summarise(
+      n_features = n(),
+      rho = cor(log1p(mean_obs_int), prop_missing,
+        method = "spearman", use = "complete.obs"
+      ),
+      .groups = "drop"
+    )
+}
+
 
 # Terminal output ---------------------------------------------------------
 
@@ -99,8 +130,8 @@ print_freq_table <- function(feat_df, patient, mode) {
   bin_labels <- paste0(seq(0, 95, BIN_WIDTH), "-", seq(5, 100, BIN_WIDTH), "%")
   tbl <- feat_df |>
     mutate(bin = cut(pct_missing,
-                     breaks = seq(0, 100, BIN_WIDTH),
-                     include.lowest = TRUE, right = FALSE, labels = bin_labels
+      breaks = seq(0, 100, BIN_WIDTH),
+      include.lowest = TRUE, right = FALSE, labels = bin_labels
     )) |>
     count(bin, .drop = FALSE) |>
     mutate(pct = 100 * n / nrow(feat_df)) |>
@@ -156,9 +187,9 @@ plot_histogram <- function(feat_df, mode_label, patient, y_limit = NULL, save = 
       linetype = "dashed", colour = "grey35", linewidth = 0.5
     ) +
     annotate("text",
-             x = c(THRESH_LOW, THRESH_MODERATE, THRESH_HIGH) * 100 + 0.8,
-             y = y_lim * 0.96, label = c("5%", "20%", "50%"),
-             hjust = 0, size = 2.8, colour = "grey35"
+      x = c(THRESH_LOW, THRESH_MODERATE, THRESH_HIGH) * 100 + 0.8,
+      y = y_lim * 0.96, label = c("5%", "20%", "50%"),
+      hjust = 0, size = 2.8, colour = "grey35"
     ) +
     scale_fill_manual(values = CLASS_COLOURS, drop = FALSE, name = NULL) +
     scale_x_continuous(
@@ -188,8 +219,8 @@ plot_histogram <- function(feat_df, mode_label, patient, y_limit = NULL, save = 
     guides(fill = guide_legend(nrow = 1))
   if (save) {
     ggsave(file.path(OUT_DIR, paste0(patient, "_histogram_", mode_label, ".pdf")),
-           p,
-           width = 8, height = 4.5
+      p,
+      width = 8, height = 4.5
     )
   }
   p
@@ -235,7 +266,7 @@ plot_feature_classes <- function(class_df, patient = NULL) {
     ggplot(aes(x = class, y = n, fill = class)) +
     geom_col(width = 0.65, show.legend = FALSE) +
     geom_text(aes(label = paste0(n, "\n(", sprintf("%.1f%%", pct), ")")),
-              vjust = -0.25, size = 3
+      vjust = -0.25, size = 3
     ) +
     scale_fill_manual(values = CLASS_COLOURS) +
     scale_y_continuous(expand = expansion(mult = c(0, 0.22)), labels = scales::comma) +
@@ -289,4 +320,3 @@ build_summaries <- function(long_data) {
       group_by(patient, mode) |> mutate(pct = 100 * n / sum(n)) |> ungroup()
   )
 }
-

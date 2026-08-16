@@ -1,6 +1,6 @@
 # =============================================================================
-# 03_benchmark.R
-# Imputation benchmark on small zones with MIXED missing mechanisms.
+# 10.2_mix_missingness_benchmark.R
+# Purpose:  Run the imputation benchmark on small zones with MIXED missing mechanisms (MCAR + MNAR)
 #
 # Methods compared:
 #   RF     - missForest on every feature
@@ -9,19 +9,10 @@
 #            mechanism (RF for MCAR, QRILC for MNAR). Upper bound on what
 #            perfect mechanism knowledge is worth.
 #
-# NOTE — no intensity-threshold method here, deliberately. The simulation
-# assigns MNAR at random with respect to intensity, so an intensity-based
-# routing rule cannot be evaluated fairly against it (its premise and the
-# generator disagree). The intensity finding lives in 02_intensity.R as a
-# DESCRIPTIVE result about the real data, not as an imputation rule tested
-# on synthetic missingness.
-#
-# INPUT CONTRACT (reusable across experiments):
-#   run_benchmark(zones): named list, each element
-#       list(mat = <pixels x features, no NA/zeros>, coords = <X,Y per pixel>)
-#
-# Prereq: 00_setup.R (functions), 03_imputation.R, 04_preprocessing.R,
-#         05_metrics.R.
+# Inputs:   - 
+# Outputs:  - 
+# Depends:  tidyverse, missForest, imputeLCMD, MsCoreUtils, 01_data.R, 
+#           02_intensity.R, 03_imputation.R, 04_preprocessing.R, 05_metrics.R 
 # =============================================================================
 
 
@@ -82,8 +73,48 @@ n_to_mask <- function(n, prop, min_observed) {
   min(k, n - min_observed)
 }
 
-#' Assign each feature MCAR or MNAR at random, then apply missingness.
-simulate_missing <- function(mat, prop, mnar_frac, min_observed) {
+#' Solve for the logistic slope b such that assigning MNAR with probability
+#' plogis(a + b*z) over standardised log-intensity z yields a realised
+#' Spearman correlation (intensity vs MNAR indicator) close to `target_rho`.
+#' Fully data-driven: the only input is the empirically measured rho, no magic
+#' constant. `a` is set so the expected MNAR fraction equals mnar_frac.
+#' Deterministic given the intensities (a short bisection), so reproducible.
+.solve_mnar_slope <- function(z, target_rho, mnar_frac,
+                              lo = -8, hi = 0, iter = 40) {
+  # target_rho is negative (dim -> more MNAR), so b is negative.
+  # a chosen each step so mean(P(MNAR)) == mnar_frac (via a second bisection).
+  fit_a <- function(b) {
+    f <- function(a) mean(plogis(a + b * z)) - mnar_frac
+    al <- -20
+    ah <- 20
+    for (i in seq_len(30)) {
+      am <- (al + ah) / 2
+      if (f(am) > 0) ah <- am else al <- am
+    }
+    (al + ah) / 2
+  }
+  realised_rho <- function(b) {
+    a <- fit_a(b)
+    pr <- plogis(a + b * z)
+    # expected correlation uses the probabilities directly (smooth, seed-free)
+    suppressWarnings(cor(z, pr, method = "spearman"))
+  }
+  # bisection on b in [lo, hi]; realised_rho is monotone decreasing in |b|
+  for (i in seq_len(iter)) {
+    mid <- (lo + hi) / 2
+    if (realised_rho(mid) > target_rho) hi <- mid else lo <- mid
+  }
+  b <- (lo + hi) / 2
+  list(b = b, a = fit_a(b))
+}
+
+#' Assign each feature MCAR or MNAR with probability driven by its intensity,
+#' calibrated to `target_rho`, then apply the SAME removal as before
+#' (MNAR = lowest-k values, MCAR = random-k). Only the mechanism ASSIGNMENT
+#' is intensity-dependent; the missing amount (k) and removal rules are
+#' unchanged, keeping this coherent with the earlier benchmark.
+simulate_missing <- function(mat, prop, mnar_frac, min_observed,
+                             target_rho = NULL) {
   n <- nrow(mat)
   p <- ncol(mat)
   k <- n_to_mask(n, prop, min_observed)
@@ -91,8 +122,25 @@ simulate_missing <- function(mat, prop, mnar_frac, min_observed) {
     return(NULL)
   }
 
-  mnar_idx <- sample.int(p, round(mnar_frac * p))
-  is_mnar <- seq_len(p) %in% mnar_idx
+  # Standardised log mean intensity per feature (the driver).
+  feat_int <- log1p(colMeans(mat))
+  z <- if (sd(feat_int) > 0) {
+    (feat_int - mean(feat_int)) / sd(feat_int)
+  } else {
+    rep(0, p)
+  }
+
+  # Probability each feature is MNAR, calibrated so the intensity/mechanism
+  # coupling matches the empirical rho. Falls back to a flat mnar_frac if no
+  # target is supplied.
+  if (is.null(target_rho)) {
+    p_mnar <- rep(mnar_frac, p)
+  } else {
+    sol <- .solve_mnar_slope(z, target_rho, mnar_frac)
+    p_mnar <- plogis(sol$a + sol$b * z)
+  }
+
+  is_mnar <- runif(p) < p_mnar # seeded upstream in run_unit -> reproducible
 
   mat_na <- mat
   for (j in seq_len(p)) {
@@ -102,7 +150,11 @@ simulate_missing <- function(mat, prop, mnar_frac, min_observed) {
   list(
     mat_na = mat_na,
     mechanism = if_else(is_mnar, "MNAR", "MCAR"),
-    n_masked = k
+    n_masked = k,
+    # realised coupling in THIS draw, for verification
+    realised_rho = suppressWarnings(
+      cor(z, as.integer(is_mnar), method = "spearman")
+    )
   )
 }
 
@@ -140,7 +192,22 @@ run_unit <- function(zone, zone_id, prop, rep, cfg = CFG, return_matrices = FALS
   mat <- zone$mat
   set.seed(cfg$seed_base + rep * 1000L + as.integer(prop * 1000))
 
-  sim <- simulate_missing(mat, prop, cfg$mnar_frac, cfg$min_observed)
+  # Resolve the coupling for THIS zone's mode. cfg$target_rho may be:
+  #   - NULL                       -> random assignment (old behaviour)
+  #   - a single number            -> applied to every zone
+  #   - a named vector c(NEG=,POS=) -> picked by the zone's mode
+  zone_mode <- stringr::str_extract(zone_id, "NEG|POS")
+  rho_z <- if (is.null(cfg$target_rho)) {
+    NULL
+  } else if (!is.null(names(cfg$target_rho))) {
+    cfg$target_rho[[zone_mode]]
+  } else {
+    cfg$target_rho
+  }
+
+  sim <- simulate_missing(mat, prop, cfg$mnar_frac, cfg$min_observed,
+    target_rho = rho_z
+  )
   if (is.null(sim)) {
     return(NULL)
   }
@@ -164,7 +231,8 @@ run_unit <- function(zone, zone_id, prop, rep, cfg = CFG, return_matrices = FALS
       n_pixels = nrow(mat), n_features = ncol(mat),
       n_masked_per_feature = sim$n_masked,
       pct_masked_actual = 100 * sim$n_masked / nrow(mat),
-      n_mnar = sum(sim$mechanism == "MNAR")
+      n_mnar = sum(sim$mechanism == "MNAR"),
+      realised_rho = sim$realised_rho
     )
 
   if (!return_matrices) {
